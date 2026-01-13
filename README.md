@@ -6,10 +6,11 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Author](https://img.shields.io/badge/Author-John%20Dimou-blueviolet)](https://optimalversion.io)
 
-> **Note for users downloading from GitHub Releases:** macOS may show a security warning because the app is not signed with an Apple Developer certificate. To bypass this, run the following command after moving the app to Applications:
-> ```bash
-> xattr -cr /Applications/ClaudeUsageBar.app
-> ```
+> **Note for users downloading from GitHub Releases:** macOS may show a security warning because the app is not signed with an Apple Developer certificate. To open the app:
+> 1. Try to open the app (it will be blocked)
+> 2. Go to **System Settings → Privacy & Security**
+> 3. Scroll down and click **"Open Anyway"** next to the ClaudeUsageBar message
+> 4. Click **Open** in the confirmation dialog
 
 A beautiful macOS menu bar app that displays your **Claude Code** usage statistics in real-time. Monitor your session and weekly limits at a glance with a stunning glassmorphic UI.
 
