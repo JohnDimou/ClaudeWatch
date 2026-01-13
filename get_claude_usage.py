@@ -104,38 +104,48 @@ def get_usage():
 
     output = b""
 
-    # Wait for initial prompt (up to 5 seconds)
-    start = time.time()
-    while time.time() - start < 5:
-        ready, _, _ = select.select([master], [], [], 0.1)
-        if ready:
-            try:
-                data = os.read(master, 4096)
-                output += data
-            except OSError:
-                break
+    # Helper to read all available output with timeout
+    def read_all(timeout_sec):
+        nonlocal output
+        start = time.time()
+        while time.time() - start < timeout_sec:
+            ready, _, _ = select.select([master], [], [], 0.1)
+            if ready:
+                try:
+                    data = os.read(master, 4096)
+                    if data:
+                        output += data
+                except OSError:
+                    break
 
-    # Send /usage command with Enter key
-    os.write(master, b"/usage\r")
-    time.sleep(0.3)
-    os.write(master, b"\r")  # Confirm selection
+    # Wait for Claude to fully initialize (fixed wait + read)
+    time.sleep(3)
+    read_all(1)
 
-    # Wait for usage data to load (up to 8 seconds)
-    start = time.time()
-    while time.time() - start < 8:
-        ready, _, _ = select.select([master], [], [], 0.1)
-        if ready:
-            try:
-                data = os.read(master, 4096)
-                output += data
-            except OSError:
-                break
+    # Check if there's a permission/theme selector or onboarding prompt
+    # Claude Code may show these on first launch after restart
+    output_str = output.decode('utf-8', errors='ignore').lower()
 
-    # Send escape to close modal and exit
-    os.write(master, b"\x1b")  # Escape key
-    time.sleep(0.3)
-    os.write(master, b"/exit\r")
+    # If we see signs of a selector/prompt, send Enter to dismiss it
+    selector_patterns = ['select a theme', 'choose a theme', 'select permission']
+    if any(pattern in output_str for pattern in selector_patterns):
+        os.write(master, b"\r")  # Accept default selection
+        time.sleep(0.5)
+        read_all(2)
+
+    # Send /usage command
+    os.write(master, b"/usage")
     time.sleep(1)
+    read_all(1)
+
+    # Use Tab to accept autocomplete, then Enter to execute
+    os.write(master, b"\t")
+    time.sleep(0.5)
+    read_all(0.5)
+
+    os.write(master, b"\r")
+    time.sleep(5)
+    read_all(5)
 
     # Clean up process
     try:
@@ -179,9 +189,15 @@ def parse_usage(text):
     }
 
     # Remove ANSI escape codes for cleaner parsing
+    # Step 1: Standard CSI sequences like \x1b[0m, \x1b[38;2;255;255;255m
     clean = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', text)
-    clean = re.sub(r'\x1b[<>=\]][^\x1b]*', '', clean)
+    # Step 2: OSC sequences like \x1b]0;title\x07 (ends with BEL or ST)
+    clean = re.sub(r'\x1b\][^\x07\x1b]*[\x07]?', '', clean)
+    # Step 3: Other escape sequences
+    clean = re.sub(r'\x1b[<>=]', '', clean)
+    # Step 4: Replace non-printable with space
     clean = re.sub(r'[^\x20-\x7E\n]', ' ', clean)
+    # Step 5: Collapse multiple spaces
     clean = re.sub(r' +', ' ', clean)
 
     # Store cleaned output (last 1000 chars for debugging)
@@ -205,7 +221,7 @@ def parse_usage(text):
             # Look for reset time
             for j in range(i, min(i + 3, len(lines))):
                 reset_match = re.search(
-                    r'resets?\s*(\d+[:\d]*\s*[ap]m[^)\n]*)',
+                    r'resets?\s*(\d+[:\d]*\s*[ap]m[^)\n]*\)?)',
                     lines[j],
                     re.IGNORECASE
                 )
@@ -223,7 +239,7 @@ def parse_usage(text):
 
             for j in range(i, min(i + 5, len(lines))):
                 reset_match = re.search(
-                    r'resets?\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[^)\n]+',
+                    r'resets?\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[^)\n]+\)?',
                     lines[j],
                     re.IGNORECASE
                 )
