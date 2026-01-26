@@ -197,12 +197,30 @@ brew install python3
 - Run `claude` in terminal and verify it works
 - Check that you have a Pro/Max subscription
 
+### Unexpected permission prompts (Photos, Music, Desktop, etc.)
+If you see macOS permission dialogs asking for access to Photos, Music, OneDrive, Desktop, or other folders:
+- **This should not happen with v1.1.0+** - we fixed issues where the subprocess could trigger these prompts
+- Try downloading the latest release
+- If the issue persists, please [open an issue](../../issues) with:
+  - Screenshot of the permission dialog
+  - macOS version
+  - App version
+  - Any relevant details about your setup (iCloud sync, OneDrive, etc.)
+
 ## Privacy & Security
 
 - **Local Only** - All data stays on your machine
 - **No External Servers** - The app only communicates with the local Claude CLI
 - **No Tracking** - No analytics or telemetry
 - **Open Source** - Full source code available for review
+
+## Legal Disclaimer
+
+**NO WARRANTY**: This software is provided "as is", without warranty of any kind, express or implied. Use at your own risk.
+
+**GDPR & DATA PROTECTION**: This app processes data locally on your device only. It does not collect, store, transmit, or share any personal data with third parties. The app only reads usage statistics from the Claude CLI running on your machine. No data leaves your computer. The author assumes no responsibility or liability for any data processing that may occur through the use of the Claude CLI itself - please refer to Anthropic's privacy policy for information about how Claude handles your data.
+
+**LIABILITY**: In no event shall the author be liable for any claim, damages, or other liability arising from the use of this software.
 
 ## Contributing
 

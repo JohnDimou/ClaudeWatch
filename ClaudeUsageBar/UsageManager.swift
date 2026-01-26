@@ -204,6 +204,10 @@ class UsageManager: ObservableObject {
         task.standardOutput = pipe
         task.standardError = pipe
 
+        // IMPORTANT: Set working directory to /tmp to prevent Claude from scanning
+        // user directories (Pictures, Music, OneDrive, etc.) which triggers permission dialogs
+        task.currentDirectoryURL = URL(fileURLWithPath: "/tmp")
+
         // Set up environment with common paths for Claude CLI
         var env = ProcessInfo.processInfo.environment
         let homePath = env["HOME"] ?? NSHomeDirectory()
@@ -236,16 +240,14 @@ class UsageManager: ObservableObject {
         }
     }
 
-    /// Finds the Python script in the app bundle or fallback locations
+    /// Finds the Python script in the app bundle or same directory
     private func findScriptPath() -> String? {
         let possiblePaths = [
             // Inside app bundle (for distribution)
             Bundle.main.path(forResource: "get_claude_usage", ofType: "py"),
             // Same directory as app (for development)
             Bundle.main.bundleURL.deletingLastPathComponent()
-                .appendingPathComponent(scriptName).path,
-            // User's home directory (fallback)
-            "\(NSHomeDirectory())/Desktop/AICodeStatBar/\(scriptName)"
+                .appendingPathComponent(scriptName).path
         ].compactMap { $0 }
 
         return possiblePaths.first { FileManager.default.fileExists(atPath: $0) }

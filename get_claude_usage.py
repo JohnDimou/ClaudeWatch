@@ -203,61 +203,58 @@ def parse_usage(text):
     # Store cleaned output (last 1000 chars for debugging)
     result["raw"] = clean[-1000:]
 
-    lines = clean.split('\n')
+    # Parse using the full text with targeted regex patterns
+    # Use DOTALL to match across newlines since ANSI cleaning can affect line structure
 
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip().lower()
+    # Session: "Current session ... XX% ... Resets TIME (timezone)"
+    # The text might be corrupted like "Reses" instead of "Resets"
+    session_match = re.search(
+        r'current\s+session.*?(\d+)\s*%.*?(?:[^\d])(\d{1,2}(?::\d{2})?\s*[ap]m\s*\([^)]+\))',
+        clean,
+        re.IGNORECASE | re.DOTALL
+    )
+    if session_match:
+        result["session_percent"] = int(session_match.group(1))
+        result["session_reset"] = session_match.group(2).strip()
+    else:
+        # Fallback: try to find just the percentage
+        session_pct = re.search(r'current\s+session.*?(\d+)\s*%', clean, re.IGNORECASE | re.DOTALL)
+        if session_pct:
+            result["session_percent"] = int(session_pct.group(1))
 
-        # Parse "Current session" section
-        if 'current session' in line:
-            # Look for percentage in nearby lines
-            for j in range(i, min(i + 3, len(lines))):
-                match = re.search(r'(\d+)\s*%', lines[j])
-                if match:
-                    result["session_percent"] = int(match.group(1))
-                    break
+    # Weekly (all models): "Current week (all models) ... XX% ... Resets DATE at TIME (timezone)"
+    # Need to stop before "Sonnet only" section
+    weekly_section = re.search(
+        r'current\s+week\s*\(all\s+models\)(.*?)(?:current\s+week\s*\(sonnet|sonnet\s+only|$)',
+        clean,
+        re.IGNORECASE | re.DOTALL
+    )
+    if weekly_section:
+        weekly_text = weekly_section.group(1)
+        # Find percentage
+        pct_match = re.search(r'(\d+)\s*%', weekly_text)
+        if pct_match:
+            result["weekly_percent"] = int(pct_match.group(1))
+        # Find reset date
+        date_match = re.search(
+            r'((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[^)]+\))',
+            weekly_text,
+            re.IGNORECASE
+        )
+        if date_match:
+            result["weekly_reset"] = date_match.group(1).strip()
 
-            # Look for reset time
-            for j in range(i, min(i + 3, len(lines))):
-                reset_match = re.search(
-                    r'resets?\s*(\d+[:\d]*\s*[ap]m[^)\n]*\)?)',
-                    lines[j],
-                    re.IGNORECASE
-                )
-                if reset_match:
-                    result["session_reset"] = reset_match.group(1).strip()
-                    break
-
-        # Parse "Current week (all models)" section
-        if 'current week' in line and 'all models' in line:
-            for j in range(i, min(i + 3, len(lines))):
-                match = re.search(r'(\d+)\s*%', lines[j])
-                if match:
-                    result["weekly_percent"] = int(match.group(1))
-                    break
-
-            for j in range(i, min(i + 5, len(lines))):
-                reset_match = re.search(
-                    r'resets?\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[^)\n]+\)?',
-                    lines[j],
-                    re.IGNORECASE
-                )
-                if reset_match:
-                    reset_text = reset_match.group(0)
-                    reset_text = re.sub(r'^resets?\s*', '', reset_text, flags=re.IGNORECASE)
-                    result["weekly_reset"] = reset_text.strip()
-                    break
-
-        # Parse "Sonnet only" section
-        if 'sonnet only' in line:
-            for j in range(i, min(i + 3, len(lines))):
-                match = re.search(r'(\d+)\s*%', lines[j])
-                if match:
-                    result["sonnet_percent"] = int(match.group(1))
-                    break
-
-        i += 1
+    # Sonnet only: "Current week (Sonnet only) ... XX%"
+    sonnet_section = re.search(
+        r'(?:current\s+week\s*\()?sonnet\s+only\)?(.*?)(?:esc|cancel|$)',
+        clean,
+        re.IGNORECASE | re.DOTALL
+    )
+    if sonnet_section:
+        sonnet_text = sonnet_section.group(1)
+        pct_match = re.search(r'(\d+)\s*%', sonnet_text)
+        if pct_match:
+            result["sonnet_percent"] = int(pct_match.group(1))
 
     return result
 
