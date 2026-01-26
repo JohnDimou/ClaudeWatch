@@ -595,7 +595,7 @@ struct InfoDetailView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             SettingsHeader(title: "Application", icon: "app.badge")
                             VStack(alignment: .leading, spacing: 6) {
-                                InfoDetailRow(label: "Version", value: "1.1.0")
+                                InfoDetailRow(label: "Version", value: "1.2.0")
                                 InfoDetailRow(label: "Platform", value: "macOS 13.0+")
                                 InfoDetailRow(label: "Framework", value: "SwiftUI")
                                 InfoDetailRow(label: "License", value: "MIT")

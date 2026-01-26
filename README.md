@@ -199,7 +199,7 @@ brew install python3
 
 ### Unexpected permission prompts (Photos, Music, Desktop, etc.)
 If you see macOS permission dialogs asking for access to Photos, Music, OneDrive, Desktop, or other folders:
-- **This should not happen with v1.1.0+** - we fixed issues where the subprocess could trigger these prompts
+- **This should not happen with v1.2.0+** - we fixed issues where the subprocess could trigger these prompts
 - Try downloading the latest release
 - If the issue persists, please [open an issue](../../issues) with:
   - Screenshot of the permission dialog
