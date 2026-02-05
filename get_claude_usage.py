@@ -223,9 +223,10 @@ def parse_usage(text):
             result["session_percent"] = int(session_pct.group(1))
 
     # Weekly (all models): "Current week (all models) ... XX% ... Resets DATE at TIME (timezone)"
+    # Note: ANSI cleaning may remove spaces, so we use \s* (zero or more) instead of \s+
     # Need to stop before "Sonnet only" section
     weekly_section = re.search(
-        r'current\s+week\s*\(all\s+models\)(.*?)(?:current\s+week\s*\(sonnet|sonnet\s+only|$)',
+        r'current\s*week\s*\(?\s*all\s*models\s*\)?(.*?)(?:current\s*week\s*\(?sonnet|sonnet\s*only|$)',
         clean,
         re.IGNORECASE | re.DOTALL
     )
@@ -235,7 +236,7 @@ def parse_usage(text):
         pct_match = re.search(r'(\d+)\s*%', weekly_text)
         if pct_match:
             result["weekly_percent"] = int(pct_match.group(1))
-        # Find reset date
+        # Find reset date - try full date first (e.g., "Feb 11 at 8:59am (Europe/Athens)")
         date_match = re.search(
             r'((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[^)]+\))',
             weekly_text,
@@ -243,10 +244,20 @@ def parse_usage(text):
         )
         if date_match:
             result["weekly_reset"] = date_match.group(1).strip()
+        else:
+            # Fallback: just time with timezone (e.g., "10am(Europe/Athens)" or "10:30am (Europe/Athens)")
+            time_match = re.search(
+                r'resets?\s*(\d{1,2}(?::\d{2})?\s*[ap]m\s*\([^)]+\))',
+                weekly_text,
+                re.IGNORECASE
+            )
+            if time_match:
+                result["weekly_reset"] = time_match.group(1).strip()
 
     # Sonnet only: "Current week (Sonnet only) ... XX%"
+    # Note: ANSI cleaning may remove spaces, so we use \s* (zero or more)
     sonnet_section = re.search(
-        r'(?:current\s+week\s*\()?sonnet\s+only\)?(.*?)(?:esc|cancel|$)',
+        r'(?:current\s*week\s*\(?\s*)?sonnet\s*only\s*\)?(.*?)(?:esc|cancel|$)',
         clean,
         re.IGNORECASE | re.DOTALL
     )
