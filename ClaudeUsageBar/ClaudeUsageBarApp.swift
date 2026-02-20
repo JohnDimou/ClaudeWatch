@@ -96,7 +96,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Creates and configures the popover
     private func setupPopover() {
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 380, height: 520)
+        popover.contentSize = NSSize(width: 380, height: 600)
         popover.behavior = .transient
         popover.animates = true
         popover.contentViewController = NSHostingController(rootView: UsagePopoverView())
@@ -136,6 +136,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let usage = usageManager.currentUsage
         let sessionPercent = usage?.sessionPercentage ?? 0
         let weeklyPercent = usage?.weeklyPercentage ?? 0
+        let sonnetPercent = usage?.sonnetPercentage ?? 0
 
         // Create icon
         let attachment = NSTextAttachment()
@@ -144,10 +145,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             attachment.image = image.withSymbolConfiguration(config)
         }
 
-        // Build attributed string: icon + percentages
+        // Build attributed string: icon + all three percentages
         let iconString = NSAttributedString(attachment: attachment)
         let textString = NSAttributedString(
-            string: " \(Int(sessionPercent))% | \(Int(weeklyPercent))%",
+            string: " \(Int(sessionPercent))% | \(Int(weeklyPercent))% | \(Int(sonnetPercent))%",
             attributes: [
                 .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium),
                 .foregroundColor: NSColor.labelColor

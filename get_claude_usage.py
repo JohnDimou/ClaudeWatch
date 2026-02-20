@@ -97,7 +97,8 @@ def get_usage():
         stdout=slave,
         stderr=slave,
         close_fds=True,
-        env={**os.environ, 'TERM': 'xterm-256color'}
+        env={**{k: v for k, v in os.environ.items() if k != 'CLAUDECODE'},
+             'TERM': 'xterm-256color'}
     )
 
     os.close(slave)

@@ -46,9 +46,7 @@ struct UsagePopoverView: View {
                             VStack(spacing: 14) {
                                 sessionCard(usage)
                                 weeklyCard(usage)
-                                if usage.sonnetPercentage > 0 {
-                                    sonnetCard(usage)
-                                }
+                                sonnetCard(usage)
                                 executionInfoCard(usage)
                             }
                             .padding(.horizontal, 20)
@@ -65,7 +63,7 @@ struct UsagePopoverView: View {
                 }
             }
         }
-        .frame(width: 380, height: 520)
+        .frame(width: 380, height: 600)
     }
 
     // MARK: - Background
@@ -197,6 +195,92 @@ struct UsagePopoverView: View {
         }
     }
 
+    // MARK: - Reset Countdown Helper
+
+    /// Parses a reset time string like "7pm (Europe/Athens)" or "Feb 26 at 1pm (Europe/Athens)"
+    /// and returns a human-readable countdown like "in 5h 23m"
+    func timeUntilReset(_ resetString: String) -> String? {
+        guard !resetString.isEmpty else { return nil }
+
+        // Extract timezone from parentheses like "(Europe/Athens)"
+        guard let tzStart = resetString.lastIndex(of: "("),
+              let tzEnd = resetString.lastIndex(of: ")") else { return nil }
+        let tzIdentifier = String(resetString[resetString.index(after: tzStart)..<tzEnd])
+        guard let timeZone = TimeZone(identifier: tzIdentifier) else { return nil }
+
+        // Extract time like "7pm", "7:30pm", "1am" (spaces may be missing after ANSI cleaning)
+        let timePattern = try! NSRegularExpression(pattern: #"(\d{1,2})(?::(\d{2}))?\s*([ap]m)"#, options: .caseInsensitive)
+        let nsString = resetString as NSString
+        guard let timeMatch = timePattern.firstMatch(in: resetString, range: NSRange(location: 0, length: nsString.length)) else { return nil }
+
+        var hour = Int(nsString.substring(with: timeMatch.range(at: 1))) ?? 0
+        let minuteRange = timeMatch.range(at: 2)
+        let minute = minuteRange.location != NSNotFound ? Int(nsString.substring(with: minuteRange)) ?? 0 : 0
+        let ampm = nsString.substring(with: timeMatch.range(at: 3)).lowercased()
+
+        if ampm == "pm" && hour != 12 { hour += 12 }
+        if ampm == "am" && hour == 12 { hour = 0 }
+
+        var calendar = Calendar.current
+        calendar.timeZone = timeZone
+
+        let now = Date()
+        var components = DateComponents()
+        components.hour = hour
+        components.minute = minute
+        components.second = 0
+        components.timeZone = timeZone
+
+        // Try to extract date like "Feb 26" or "Feb26" (spaces may be missing after ANSI cleaning)
+        // Use [a-zA-Z]* instead of \w* so it doesn't greedily consume digits
+        let datePattern = try! NSRegularExpression(pattern: #"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-zA-Z]*\s*(\d{1,2})"#, options: .caseInsensitive)
+        if let dateMatch = datePattern.firstMatch(in: resetString, range: NSRange(location: 0, length: nsString.length)) {
+            let monthStr = String(nsString.substring(with: dateMatch.range(at: 1)).lowercased().prefix(3))
+            let day = Int(nsString.substring(with: dateMatch.range(at: 2))) ?? 1
+
+            let months: [String: Int] = ["jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+                                          "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12]
+            components.month = months[monthStr]
+            components.day = day
+            components.year = calendar.component(.year, from: now)
+
+            if let resetDate = calendar.date(from: components), resetDate < now {
+                components.year = (components.year ?? 2026) + 1
+            }
+        } else {
+            // Session reset - just time, assume today
+            components.year = calendar.component(.year, from: now)
+            components.month = calendar.component(.month, from: now)
+            components.day = calendar.component(.day, from: now)
+
+            if let resetDate = calendar.date(from: components), resetDate < now {
+                if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now) {
+                    components.day = calendar.component(.day, from: tomorrow)
+                    components.month = calendar.component(.month, from: tomorrow)
+                    components.year = calendar.component(.year, from: tomorrow)
+                }
+            }
+        }
+
+        guard let resetDate = calendar.date(from: components) else { return nil }
+
+        let diff = resetDate.timeIntervalSince(now)
+        guard diff > 0 else { return nil }
+
+        let totalMinutes = Int(diff / 60)
+        let days = totalMinutes / (60 * 24)
+        let hours = (totalMinutes % (60 * 24)) / 60
+        let minutes = totalMinutes % 60
+
+        if days > 0 {
+            return hours > 0 ? "in \(days)d \(hours)h" : "in \(days)d"
+        } else if hours > 0 {
+            return minutes > 0 ? "in \(hours)h \(minutes)m" : "in \(hours)h"
+        } else {
+            return "in \(minutes)m"
+        }
+    }
+
     // MARK: - Usage Cards
 
     func usageGradient(for percentage: Double) -> [Color] {
@@ -218,6 +302,7 @@ struct UsagePopoverView: View {
             title: "Current Session",
             percentage: usage.sessionPercentage,
             resetText: usage.sessionReset.isEmpty ? nil : "Resets \(usage.sessionReset)",
+            countdownText: timeUntilReset(usage.sessionReset),
             gradient: gradient,
             icon: "clock.fill",
             iconBackground: [gradient[0].opacity(0.25), gradient[1].opacity(0.25)]
@@ -230,6 +315,7 @@ struct UsagePopoverView: View {
             title: "Weekly Limit (All Models)",
             percentage: usage.weeklyPercentage,
             resetText: usage.weeklyReset.isEmpty ? nil : "Resets \(usage.weeklyReset)",
+            countdownText: timeUntilReset(usage.weeklyReset),
             gradient: gradient,
             icon: "calendar",
             iconBackground: [gradient[0].opacity(0.25), gradient[1].opacity(0.25)]
@@ -241,7 +327,8 @@ struct UsagePopoverView: View {
         return EnhancedUsageCard(
             title: "Weekly (Sonnet Only)",
             percentage: usage.sonnetPercentage,
-            resetText: nil,
+            resetText: usage.weeklyReset.isEmpty ? nil : "Resets \(usage.weeklyReset)",
+            countdownText: timeUntilReset(usage.weeklyReset),
             gradient: gradient,
             icon: "sparkles",
             iconBackground: [gradient[0].opacity(0.25), gradient[1].opacity(0.25)]
@@ -458,6 +545,7 @@ struct EnhancedUsageCard: View {
     let title: String
     let percentage: Double
     let resetText: String?
+    let countdownText: String?
     let gradient: [Color]
     let icon: String
     let iconBackground: [Color]
@@ -492,6 +580,18 @@ struct EnhancedUsageCard: View {
                             Text(reset)
                                 .font(.system(size: 10))
                                 .foregroundColor(.secondary)
+                        }
+
+                        if let countdown = countdownText {
+                            HStack(spacing: 3) {
+                                Image(systemName: "timer")
+                                    .font(.system(size: 9))
+                                Text(countdown)
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            }
+                            .foregroundStyle(
+                                LinearGradient(colors: gradient, startPoint: .leading, endPoint: .trailing)
+                            )
                         }
                     }
 
@@ -595,7 +695,7 @@ struct InfoDetailView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             SettingsHeader(title: "Application", icon: "app.badge")
                             VStack(alignment: .leading, spacing: 6) {
-                                InfoDetailRow(label: "Version", value: "1.2.1")
+                                InfoDetailRow(label: "Version", value: "1.3.0")
                                 InfoDetailRow(label: "Platform", value: "macOS 13.0+")
                                 InfoDetailRow(label: "Framework", value: "SwiftUI")
                                 InfoDetailRow(label: "License", value: "MIT")
