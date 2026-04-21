@@ -15,6 +15,35 @@ import ServiceManagement
 
 // MARK: - Data Models
 
+/// One Last-24h insight as emitted by the CLI. Fully dynamic — the
+/// titles and count come straight from `/usage`, so the app adapts
+/// when Anthropic adds, removes, or rewords bullets.
+struct UsageInsight: Identifiable, Codable {
+    let id: UUID
+    let percent: Int
+    let title: String
+    let description: String
+
+    enum CodingKeys: String, CodingKey {
+        case percent, title, description
+    }
+
+    init(percent: Int, title: String, description: String) {
+        self.id = UUID()
+        self.percent = percent
+        self.title = title
+        self.description = description
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = UUID()
+        self.percent = try c.decodeIfPresent(Int.self, forKey: .percent) ?? 0
+        self.title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        self.description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+    }
+}
+
 /// Represents Claude Code usage statistics
 struct ClaudeUsage {
     /// Current session usage percentage (0-100)
@@ -29,8 +58,20 @@ struct ClaudeUsage {
     /// Human-readable session reset time (e.g., "5pm (Europe/Athens)")
     var sessionReset: String = ""
 
-    /// Human-readable weekly reset time (e.g., "Jan 16 at 10am")
+    /// Human-readable weekly reset time for all models (e.g., "Jan 16 at 10am")
     var weeklyReset: String = ""
+
+    /// Human-readable weekly reset time for Sonnet (independent of all-models)
+    var sonnetReset: String = ""
+
+    /// Dynamic Last-24h insights (any count, sourced from CLI output)
+    var insights: [UsageInsight] = []
+
+    /// Plan name shown in the CLI status line (e.g., "Claude Max"); empty if unknown.
+    var plan: String = ""
+
+    /// Model descriptor shown in the CLI status line (e.g., "Opus 4.7 (1M context)").
+    var model: String = ""
 
     /// Timestamp of when this data was fetched
     var lastUpdated: Date = Date()
@@ -46,6 +87,10 @@ struct UsageJSON: Codable {
     let weekly_percent: Int?
     let weekly_reset: String?
     let sonnet_percent: Int?
+    let sonnet_reset: String?
+    let insights: [UsageInsight]?
+    let plan: String?
+    let model: String?
     let raw: String?
     let error: String?
 }
@@ -154,9 +199,18 @@ class UsageManager: ObservableObject {
 
     // MARK: - Public Methods
 
-    /// Fetches usage data asynchronously
-    /// Posts `usageDidUpdate` notification when complete
+    /// Fetches usage data asynchronously.
+    ///
+    /// Guards against concurrent invocations — launching two Claude CLI
+    /// processes at the same time (e.g. app-launch fetch + refresh-on-open
+    /// fetch) causes both to contend for the single interactive session
+    /// and frequently returns an empty parse. If a fetch is already in
+    /// flight, new requests are dropped.
+    ///
+    /// Posts `usageDidUpdate` notification on completion.
     func fetchUsage() {
+        if isLoading { return }
+
         isLoading = true
         errorMessage = nil
 
@@ -170,7 +224,21 @@ class UsageManager: ObservableObject {
 
                 switch result {
                 case .success(let usage):
-                    self.currentUsage = usage
+                    // Reject responses that contain no usable data. This
+                    // happens on a cold start when the Python script times
+                    // out before /usage finishes rendering — the JSON is
+                    // structurally valid but every field is zero/empty,
+                    // and showing that would stomp on any prior good data
+                    // and mislead the user with fake "0%" readings.
+                    if self.isLikelyEmpty(usage) {
+                        // Preserve whatever we already had and surface an
+                        // error so the UI offers "Try Again".
+                        if self.currentUsage == nil {
+                            self.errorMessage = "Claude CLI didn't finish /usage in time — tap refresh to retry."
+                        }
+                    } else {
+                        self.currentUsage = usage
+                    }
                 case .failure(let error):
                     self.errorMessage = error.localizedDescription
                 }
@@ -178,6 +246,21 @@ class UsageManager: ObservableObject {
                 NotificationCenter.default.post(name: .usageDidUpdate, object: nil)
             }
         }
+    }
+
+    /// Heuristic for an "empty" parse result. A genuine response always
+    /// includes at least one reset timestamp, so if every percentage is
+    /// zero AND all reset strings are blank AND no insights landed, we
+    /// treat it as a timed-out parse.
+    private func isLikelyEmpty(_ usage: ClaudeUsage) -> Bool {
+        let noPercents = usage.sessionPercentage == 0
+            && usage.weeklyPercentage == 0
+            && usage.sonnetPercentage == 0
+        let noResets = usage.sessionReset.isEmpty
+            && usage.weeklyReset.isEmpty
+            && usage.sonnetReset.isEmpty
+        let noInsights = usage.insights.isEmpty
+        return noPercents && noResets && noInsights
     }
 
     // MARK: - Private Methods
@@ -286,6 +369,10 @@ class UsageManager: ObservableObject {
             usage.sonnetPercentage = Double(usageJSON.sonnet_percent ?? 0)
             usage.sessionReset = usageJSON.session_reset ?? ""
             usage.weeklyReset = usageJSON.weekly_reset ?? ""
+            usage.sonnetReset = usageJSON.sonnet_reset ?? ""
+            usage.insights = usageJSON.insights ?? []
+            usage.plan = usageJSON.plan ?? ""
+            usage.model = usageJSON.model ?? ""
             usage.rawOutput = usageJSON.raw ?? ""
             usage.lastUpdated = Date()
 

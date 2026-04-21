@@ -12,6 +12,7 @@
 		003 /* UsagePopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 103; };
 		004 /* get_claude_usage.py in Resources */ = {isa = PBXBuildFile; fileRef = 105; };
 		005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 106; };
+		006 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 107; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -21,6 +22,7 @@
 		104 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		105 /* get_claude_usage.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; name = get_claude_usage.py; path = ../get_claude_usage.py; sourceTree = "<group>"; };
 		106 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		107 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		200 /* ClaudeUsageBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClaudeUsageBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -49,6 +51,7 @@
 				101 /* ClaudeUsageBarApp.swift */,
 				102 /* UsageManager.swift */,
 				103 /* UsagePopoverView.swift */,
+				107 /* UpdateChecker.swift */,
 				106 /* Assets.xcassets */,
 				105 /* get_claude_usage.py */,
 				104 /* Info.plist */,
@@ -137,6 +140,7 @@
 				001 /* ClaudeUsageBarApp.swift in Sources */,
 				002 /* UsageManager.swift in Sources */,
 				003 /* UsagePopoverView.swift in Sources */,
+				006 /* UpdateChecker.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

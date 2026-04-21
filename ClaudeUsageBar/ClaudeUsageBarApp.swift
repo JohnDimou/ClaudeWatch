@@ -63,6 +63,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Initial fetch
         usageManager.fetchUsage()
 
+        // Kick off a GitHub release check. Respects its own 6h cache
+        // internally, so this is safe to call unconditionally on launch.
+        UpdateChecker.shared.checkForUpdates()
+
         // Observe usage changes to update the status bar
         NotificationCenter.default.addObserver(
             self,

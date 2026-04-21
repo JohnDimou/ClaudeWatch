@@ -20,15 +20,16 @@ A beautiful macOS menu bar app that displays your **Claude Code** usage statisti
 
 ## Features
 
-- **Real-time Usage Tracking** - See your current session and weekly usage percentages directly in the menu bar
-- **Dynamic Color Indicators** - Progress bars change from green to yellow to red based on usage
-- **Glassmorphic UI** - Beautiful, modern popup with gradient progress bars and glow effects
-- **Configurable Auto-refresh** - Set refresh interval from 30 seconds to 10 minutes (or disable)
-- **Settings Panel** - Customize refresh behavior through the built-in settings
-- **Multiple Model Support** - Tracks usage for all models and Sonnet-specific limits
-- **Reset Time Display** - Know exactly when your limits reset
-- **Native macOS App** - Built with SwiftUI for optimal performance
-- **Zero Token Usage** - Only queries account stats, never uses API tokens
+- **Real-time Usage Tracking** — Session, weekly-all-models, and weekly-Sonnet percentages in the menu bar at a glance
+- **Last 24h Insights** — Fully dynamic behavioral signals parsed live from `/usage` (long sessions, high context, subagent-heavy runs) with collapsible descriptions
+- **Independent Reset Countdowns** — Each tier shows its own reset timestamp plus a live "in Xh Ym" countdown
+- **Dynamic Plan/Model Detection** — Header reflects the actual plan and model reported by the CLI (Claude Max, Pro, Team, etc.) — nothing hardcoded
+- **GitHub Release Auto-Check** — Polls GitHub on launch; a banner appears when a newer build is available with a one-tap Download button
+- **Dynamic Color Indicators** — Progress bars transition green → amber → red based on usage level
+- **Glassmorphic UI** — Warm coral accent, gradient progress bars, animated rings, and subtle glass surfaces
+- **Configurable Auto-refresh** — 30s / 1m / 2m / 5m / 10m / Never
+- **Native macOS App** — SwiftUI, menu-bar only, no dock icon
+- **Zero Token Usage** — Reads account stats locally via the Claude CLI; never invokes a model
 
 ## Requirements
 
@@ -130,10 +131,20 @@ Settings are persisted and remembered between app restarts.
 
 The app uses a Python script to interact with the Claude Code CLI:
 
-1. Spawns Claude CLI in an interactive pseudo-terminal (pty)
-2. Sends the `/usage` slash command
-3. Parses the terminal output to extract usage data
+1. Spawns Claude CLI in a 200-column pseudo-terminal (pty) so the `/usage` box renders fully
+2. Sends the `/usage` slash command and waits for the "Last 24h" section to appear as the signal that rendering is complete
+3. Parses the terminal output structurally — section boundaries are detected by the last occurrence of each header, and insights are extracted purely by their `NN%` pattern with no hardcoded wording
 4. Displays the results in a native SwiftUI interface
+
+### Update Checking
+
+On launch (and on popover open, respecting a 6-hour cache) the app queries
+`api.github.com/repos/JohnDimou/ClaudeCodeUsageBar/releases/latest`, compares
+`tag_name` against the installed `CFBundleShortVersionString` using a semver
+compare, and surfaces a banner when a newer stable release is published. The
+user taps **Download** to open the release page in their browser — the app
+never attempts an in-place install (this distribution is unsigned, so Gatekeeper
+would reject any automated replace).
 
 ### Important: No Token Usage
 
@@ -146,11 +157,11 @@ ClaudeCodeUsageBar/
 ├── ClaudeUsageBar/
 │   ├── ClaudeUsageBarApp.swift    # App entry point & menu bar setup
 │   ├── UsageManager.swift          # Usage data fetching, parsing & settings
-│   ├── UsagePopoverView.swift      # SwiftUI popup interface & settings panel
+│   ├── UsagePopoverView.swift      # SwiftUI popup, Last 24h card, update banner
+│   ├── UpdateChecker.swift         # GitHub release polling + semver compare
 │   └── Info.plist                  # App configuration
 ├── get_claude_usage.py             # Python script for CLI interaction
 ├── ClaudeUsageBar.xcodeproj/       # Xcode project
-├── screenshot.png                  # App screenshot
 ├── LICENSE                         # MIT License
 └── README.md
 ```

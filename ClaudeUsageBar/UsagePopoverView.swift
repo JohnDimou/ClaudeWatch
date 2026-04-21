@@ -15,6 +15,7 @@ import SwiftUI
 
 struct UsagePopoverView: View {
     @ObservedObject var usageManager = UsageManager.shared
+    @ObservedObject var updateChecker = UpdateChecker.shared
     @State private var showingInfo = false
     @State private var showingSettings = false
     @Environment(\.colorScheme) var colorScheme
@@ -44,9 +45,15 @@ struct UsagePopoverView: View {
                     } else if let usage = usageManager.currentUsage {
                         ScrollView(showsIndicators: false) {
                             VStack(spacing: 14) {
+                                if let update = updateChecker.availableUpdate {
+                                    UpdateBanner(update: update)
+                                }
                                 sessionCard(usage)
                                 weeklyCard(usage)
                                 sonnetCard(usage)
+                                if !usage.insights.isEmpty {
+                                    last24hCard(usage)
+                                }
                                 executionInfoCard(usage)
                             }
                             .padding(.horizontal, 20)
@@ -84,7 +91,7 @@ struct UsagePopoverView: View {
                     Circle()
                         .fill(
                             RadialGradient(
-                                colors: [Color.purple.opacity(0.15), Color.clear],
+                                colors: [Color(hex: "d97757").opacity(0.15), Color.clear],
                                 center: .center,
                                 startRadius: 0,
                                 endRadius: 150
@@ -151,9 +158,13 @@ struct UsagePopoverView: View {
                         Circle()
                             .fill(Color.green)
                             .frame(width: 6, height: 6)
-                        Text("Claude Max")
+                        // Plan + model are parsed live from the CLI; fall back
+                        // to a neutral label so we never display stale text.
+                        Text(headerSubtitle)
                             .font(.system(size: 10, weight: .medium))
                             .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
                 }
             }
@@ -192,6 +203,20 @@ struct UsagePopoverView: View {
                 .background(Color.primary.opacity(0.05))
                 .clipShape(Circle())
             }
+        }
+    }
+
+    /// Builds the one-line subtitle under the app title. Prefers the
+    /// CLI-reported plan, optionally annotated with the active model. Falls
+    /// back to "Claude Code" when nothing is known yet (first launch).
+    var headerSubtitle: String {
+        let plan = usageManager.currentUsage?.plan ?? ""
+        let model = usageManager.currentUsage?.model ?? ""
+        switch (plan.isEmpty, model.isEmpty) {
+        case (false, false): return "\(plan) · \(model)"
+        case (false, true):  return plan
+        case (true, false):  return model
+        case (true, true):   return "Claude Code"
         }
     }
 
@@ -324,15 +349,80 @@ struct UsagePopoverView: View {
 
     func sonnetCard(_ usage: ClaudeUsage) -> some View {
         let gradient = usageGradient(for: usage.sonnetPercentage)
+        // Sonnet has its own independent reset — fall back to weekly only if
+        // the script couldn't extract the Sonnet-specific reset.
+        let resetSource = usage.sonnetReset.isEmpty ? usage.weeklyReset : usage.sonnetReset
         return EnhancedUsageCard(
             title: "Weekly (Sonnet Only)",
             percentage: usage.sonnetPercentage,
-            resetText: usage.weeklyReset.isEmpty ? nil : "Resets \(usage.weeklyReset)",
-            countdownText: timeUntilReset(usage.weeklyReset),
+            resetText: resetSource.isEmpty ? nil : "Resets \(resetSource)",
+            countdownText: timeUntilReset(resetSource),
             gradient: gradient,
             icon: "sparkles",
             iconBackground: [gradient[0].opacity(0.25), gradient[1].opacity(0.25)]
         )
+    }
+
+    // MARK: - Last 24h Insights Card
+
+    /// Cycling palette used for numbered insights — purely presentational,
+    /// independent of the CLI content so any future insight picks a color.
+    private static let insightPalette: [Color] = [
+        Color(hex: "f59e0b"),   // amber
+        Color(hex: "d97757"),   // coral (brand)
+        Color(hex: "06b6d4"),   // cyan
+        Color(hex: "ec4899"),   // pink
+        Color(hex: "10b981"),   // emerald
+        Color(hex: "b85c3b"),   // deep coral
+    ]
+
+    func last24hCard(_ usage: ClaudeUsage) -> some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(hex: "d97757").opacity(0.25), Color(hex: "b85c3b").opacity(0.25)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 30, height: 30)
+                        Image(systemName: "chart.bar.xaxis")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [Color(hex: "d97757"), Color(hex: "b85c3b")],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                    }
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Last 24h")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.primary)
+                        Text("Independent signals, not a breakdown")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                }
+
+                Divider().background(Color.primary.opacity(0.1))
+
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(Array(usage.insights.enumerated()), id: \.element.id) { index, insight in
+                        NumberedInsightRow(
+                            index: index + 1,
+                            tint: Self.insightPalette[index % Self.insightPalette.count],
+                            insight: insight
+                        )
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Execution Info Card
@@ -433,7 +523,7 @@ struct UsagePopoverView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 10)
                 .background(
-                    LinearGradient(colors: [.purple, .blue], startPoint: .leading, endPoint: .trailing)
+                    LinearGradient(colors: [Color(hex: "d97757"), Color(hex: "b85c3b")], startPoint: .leading, endPoint: .trailing)
                 )
                 .clipShape(Capsule())
             }
@@ -474,7 +564,7 @@ struct UsagePopoverView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 10)
                 .background(
-                    LinearGradient(colors: [.purple, .blue], startPoint: .leading, endPoint: .trailing)
+                    LinearGradient(colors: [Color(hex: "d97757"), Color(hex: "b85c3b")], startPoint: .leading, endPoint: .trailing)
                 )
                 .clipShape(Capsule())
             }
@@ -639,6 +729,10 @@ struct EnhancedUsageCard: View {
             }
         }
         .onAppear {
+            // Triggered whenever a card appears (popover opens) — a good
+            // cheap moment to revalidate the release feed if our cache has
+            // expired. Respects UpdateChecker's internal 6h cache.
+            UpdateChecker.shared.checkForUpdates()
             withAnimation(.easeOut(duration: 0.8)) {
                 animatedPercentage = percentage
             }
@@ -695,7 +789,7 @@ struct InfoDetailView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             SettingsHeader(title: "Application", icon: "app.badge")
                             VStack(alignment: .leading, spacing: 6) {
-                                InfoDetailRow(label: "Version", value: "1.3.0")
+                                InfoDetailRow(label: "Version", value: "1.5.0")
                                 InfoDetailRow(label: "Platform", value: "macOS 13.0+")
                                 InfoDetailRow(label: "Framework", value: "SwiftUI")
                                 InfoDetailRow(label: "License", value: "MIT")
@@ -828,7 +922,7 @@ struct SettingsView: View {
                                 }
                                 Spacer()
                                 Toggle("", isOn: $usageManager.launchAtLogin)
-                                    .toggleStyle(SwitchToggleStyle(tint: Color(hex: "8b5cf6")))
+                                    .toggleStyle(SwitchToggleStyle(tint: Color(hex: "d97757")))
                                     .labelsHidden()
                             }
                         }
@@ -867,11 +961,14 @@ struct SettingsView: View {
                                 }
                                 Spacer()
                                 Toggle("", isOn: $usageManager.refreshOnOpen)
-                                    .toggleStyle(SwitchToggleStyle(tint: Color(hex: "8b5cf6")))
+                                    .toggleStyle(SwitchToggleStyle(tint: Color(hex: "d97757")))
                                     .labelsHidden()
                             }
                         }
                     }
+
+                    // Updates Section
+                    UpdatesSettingsCard()
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 20)
@@ -879,6 +976,118 @@ struct SettingsView: View {
 
             Spacer()
         }
+    }
+}
+
+/// "Updates" row in Settings: current version, last-checked timestamp,
+/// and a manual "Check Now" button that bypasses the 6h cache.
+struct UpdatesSettingsCard: View {
+    @ObservedObject private var checker = UpdateChecker.shared
+
+    var body: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 14) {
+                SettingsHeader(title: "Updates", icon: "arrow.triangle.2.circlepath")
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Installed")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("v\(checker.currentVersion)")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.primary)
+                    }
+
+                    HStack {
+                        Text("Latest")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        if let update = checker.availableUpdate {
+                            Text("v\(update.latestVersion)")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(Color(hex: "d97757"))
+                        } else if checker.lastCheckedDate != nil {
+                            Text("Up to date")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.green)
+                        } else {
+                            Text("—")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    HStack {
+                        Text("Last checked")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(lastCheckedLabel)
+                            .font(.system(size: 12))
+                            .foregroundColor(.primary)
+                    }
+
+                    if let error = checker.lastCheckError {
+                        Text(error)
+                            .font(.system(size: 10))
+                            .foregroundColor(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Button(action: { checker.checkForUpdates(force: true) }) {
+                        HStack(spacing: 6) {
+                            if checker.isChecking {
+                                ProgressView().scaleEffect(0.6)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 11, weight: .semibold))
+                            }
+                            Text(checker.isChecking ? "Checking…" : "Check Now")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(
+                            LinearGradient(
+                                colors: [Color(hex: "d97757"), Color(hex: "b85c3b")],
+                                startPoint: .leading, endPoint: .trailing
+                            )
+                        )
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(checker.isChecking)
+
+                    if checker.availableUpdate != nil {
+                        Button(action: { checker.openReleasePage() }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.up.right.square")
+                                    .font(.system(size: 10))
+                                Text("View Release")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            .foregroundColor(.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.primary.opacity(0.06))
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private var lastCheckedLabel: String {
+        guard let date = checker.lastCheckedDate else { return "Never" }
+        return date.formatted(.relative(presentation: .named))
     }
 }
 
@@ -890,7 +1099,7 @@ struct SettingsHeader: View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Color(hex: "8b5cf6"))
+                .foregroundColor(Color(hex: "d97757"))
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.primary)
@@ -932,7 +1141,7 @@ struct IntervalButton: View {
                 .background(
                     RoundedRectangle(cornerRadius: 8)
                         .fill(isSelected
-                            ? LinearGradient(colors: [Color(hex: "8b5cf6"), Color(hex: "6366f1")], startPoint: .leading, endPoint: .trailing)
+                            ? LinearGradient(colors: [Color(hex: "d97757"), Color(hex: "b85c3b")], startPoint: .leading, endPoint: .trailing)
                             : LinearGradient(colors: [Color.primary.opacity(0.05), Color.primary.opacity(0.05)], startPoint: .leading, endPoint: .trailing)
                         )
                 )
@@ -1006,6 +1215,181 @@ struct InfoRowSmall: View {
     }
 }
 
+// MARK: - Update Banner
+
+/// Prominent banner shown above the usage cards when a newer GitHub
+/// release is available. Tapping Download opens the release page;
+/// tapping the close button hides the banner until a newer release
+/// ships.
+struct UpdateBanner: View {
+    let update: AvailableUpdate
+    @ObservedObject private var updateChecker = UpdateChecker.shared
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(hex: "d97757").opacity(0.30), Color(hex: "b85c3b").opacity(0.30)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 32, height: 32)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color(hex: "d97757"), Color(hex: "b85c3b")],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Update available · v\(update.latestVersion)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.primary)
+                Text("You're on v\(update.currentVersion). Tap Download to open the release.")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 8) {
+                    Button(action: { updateChecker.openReleasePage() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text("Download")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            LinearGradient(
+                                colors: [Color(hex: "d97757"), Color(hex: "b85c3b")],
+                                startPoint: .leading, endPoint: .trailing
+                            )
+                        )
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { updateChecker.dismissCurrentUpdate() }) {
+                        Text("Later")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.primary.opacity(0.05))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 2)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(hex: "d97757").opacity(0.12), Color(hex: "b85c3b").opacity(0.08)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color(hex: "d97757").opacity(0.35), lineWidth: 1)
+                )
+        )
+    }
+}
+
+/// One insight rendered /usage-style: numbered badge, bold title line
+/// with the percentage, and a collapsible description. Tapping anywhere
+/// on the row toggles the description. Fully content-agnostic.
+struct NumberedInsightRow: View {
+    let index: Int
+    let tint: Color
+    let insight: UsageInsight
+
+    @State private var expanded = false
+
+    private var hasDescription: Bool { !insight.description.isEmpty }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 10) {
+                // Numbered badge — colored, gently luminous
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [tint.opacity(0.28), tint.opacity(0.14)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 22, height: 22)
+                    Circle()
+                        .stroke(tint.opacity(0.35), lineWidth: 1)
+                        .frame(width: 22, height: 22)
+                    Text("\(index)")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundColor(tint)
+                }
+
+                // Title line: "NN% — <title>"
+                (
+                    Text("\(insight.percent)% ")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundColor(tint)
+                    + Text(insight.title)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.primary)
+                )
+                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(expanded ? 4 : 2)
+
+                Spacer(minLength: 4)
+
+                if hasDescription {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .rotationEffect(.degrees(expanded ? 180 : 0))
+                        .frame(width: 16, height: 16)
+                        .background(Color.primary.opacity(0.05))
+                        .clipShape(Circle())
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard hasDescription else { return }
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    expanded.toggle()
+                }
+            }
+
+            if expanded && hasDescription {
+                Text(insight.description)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 32)
+                    .padding(.trailing, 4)
+                    .transition(
+                        .opacity.combined(with: .move(edge: .top))
+                    )
+            }
+        }
+    }
+}
+
 struct InfoSection<Content: View>: View {
     let title: String
     let icon: String
@@ -1016,7 +1400,7 @@ struct InfoSection<Content: View>: View {
             HStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.purple)
+                    .foregroundColor(Color(hex: "d97757"))
                 Text(title)
                     .font(.system(size: 14, weight: .semibold))
             }
@@ -1057,11 +1441,11 @@ struct StepRow: View {
         HStack(alignment: .top, spacing: 10) {
             ZStack {
                 Circle()
-                    .fill(Color.purple.opacity(0.1))
+                    .fill(Color(hex: "d97757").opacity(0.1))
                     .frame(width: 22, height: 22)
                 Text("\(number)")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.purple)
+                    .foregroundColor(Color(hex: "d97757"))
             }
 
             Text(text)
