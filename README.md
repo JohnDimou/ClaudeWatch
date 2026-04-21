@@ -14,22 +14,27 @@
 
 A beautiful macOS menu bar app that displays your **Claude Code** usage statistics in real-time. Monitor your session and weekly limits at a glance with a stunning glassmorphic UI.
 
-<p align="center">
-  <img src="demo-v2.gif" alt="ClaudeWatch Demo" width="600">
-</p>
-
 ## Features
 
-- **Real-time Usage Tracking** — Session, weekly-all-models, and weekly-Sonnet percentages in the menu bar at a glance
+<table>
+<tr>
+<td valign="top" width="62%">
+
+- **Real-time Usage Tracking** — Session, weekly (all models), and weekly (Sonnet) percentages in the menu bar at a glance
 - **Last 24h Insights** — Fully dynamic behavioral signals parsed live from `/usage` (long sessions, high context, subagent-heavy runs) with collapsible descriptions
 - **Independent Reset Countdowns** — Each tier shows its own reset timestamp plus a live "in Xh Ym" countdown
 - **Dynamic Plan/Model Detection** — Header reflects the actual plan and model reported by the CLI (Claude Max, Pro, Team, etc.) — nothing hardcoded
 - **GitHub Release Auto-Check** — Polls GitHub on launch; a banner appears when a newer build is available with a one-tap Download button
 - **Dynamic Color Indicators** — Progress bars transition green → amber → red based on usage level
-- **Glassmorphic UI** — Warm coral accent, gradient progress bars, animated rings, and subtle glass surfaces
 - **Configurable Auto-refresh** — 30s / 1m / 2m / 5m / 10m / Never
-- **Native macOS App** — SwiftUI, menu-bar only, no dock icon
 - **Zero Token Usage** — Reads account stats locally via the Claude CLI; never invokes a model
+
+</td>
+<td valign="top" width="38%" align="center">
+  <img src="demo-v2.gif" alt="ClaudeWatch Demo" width="300">
+</td>
+</tr>
+</table>
 
 ## Requirements
 
