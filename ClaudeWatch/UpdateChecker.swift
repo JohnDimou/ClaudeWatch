@@ -1,6 +1,6 @@
 //
 //  UpdateChecker.swift
-//  ClaudeUsageBar
+//  ClaudeWatch
 //
 //  Checks the app's GitHub repo for newer releases and exposes the
 //  result to the UI. Simple semver comparison against the bundled
@@ -64,7 +64,7 @@ final class UpdateChecker: ObservableObject {
 
     // Configuration — repository the app checks against.
     private let owner = "JohnDimou"
-    private let repo = "ClaudeCodeUsageBar"
+    private let repo = "ClaudeWatch"
 
     // Cache lifetime for opportunistic checks (manual checks bypass this).
     private let cacheDuration: TimeInterval = 6 * 60 * 60
@@ -117,7 +117,7 @@ final class UpdateChecker: ObservableObject {
 
         var request = URLRequest(url: url)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("ClaudeUsageBar/\(currentVersion)", forHTTPHeaderField: "User-Agent")
+        request.setValue("ClaudeWatch/\(currentVersion)", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 15
 
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in

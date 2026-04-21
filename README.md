@@ -1,4 +1,4 @@
-# Claude Code Usage Bar
+# ClaudeWatch
 
 [![macOS](https://img.shields.io/badge/macOS-13.0%2B-blue?logo=apple)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-5.0-orange?logo=swift)](https://swift.org/)
@@ -9,13 +9,13 @@
 > **Note for users downloading from GitHub Releases:** macOS may show a security warning because the app is not signed with an Apple Developer certificate. To open the app:
 > 1. Try to open the app (it will be blocked)
 > 2. Go to **System Settings → Privacy & Security**
-> 3. Scroll down and click **"Open Anyway"** next to the ClaudeUsageBar message
+> 3. Scroll down and click **"Open Anyway"** next to the ClaudeWatch message
 > 4. Click **Open** in the confirmation dialog
 
 A beautiful macOS menu bar app that displays your **Claude Code** usage statistics in real-time. Monitor your session and weekly limits at a glance with a stunning glassmorphic UI.
 
 <p align="center">
-  <img src="demo-v2.gif" alt="Claude Code Usage Bar Demo" width="600">
+  <img src="demo-v2.gif" alt="ClaudeWatch Demo" width="600">
 </p>
 
 ## Features
@@ -67,30 +67,30 @@ claude --version
 ### Option 1: Download Release (Recommended)
 
 1. Download the latest `.app` from [Releases](../../releases)
-2. Move `ClaudeUsageBar.app` to your Applications folder
+2. Move `ClaudeWatch.app` to your Applications folder
 3. Open the app (you may need to right-click → Open the first time due to Gatekeeper)
 
 ### Option 2: Build from Source
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/JohnDimou/ClaudeCodeUsageBar.git
-   cd ClaudeCodeUsageBar
+   git clone https://github.com/JohnDimou/ClaudeWatch.git
+   cd ClaudeWatch
    ```
 
 2. Open in Xcode:
    ```bash
-   open ClaudeUsageBar.xcodeproj
+   open ClaudeWatch.xcodeproj
    ```
 
 3. Build and run (⌘+R)
 
 Or build from command line:
 ```bash
-xcodebuild -project ClaudeUsageBar.xcodeproj -scheme ClaudeUsageBar -configuration Release build
+xcodebuild -project ClaudeWatch.xcodeproj -scheme ClaudeWatch -configuration Release build
 ```
 
-The built app will be in `~/Library/Developer/Xcode/DerivedData/ClaudeUsageBar-*/Build/Products/Release/`
+The built app will be in `~/Library/Developer/Xcode/DerivedData/ClaudeWatch-*/Build/Products/Release/`
 
 ## Usage
 
@@ -139,7 +139,7 @@ The app uses a Python script to interact with the Claude Code CLI:
 ### Update Checking
 
 On launch (and on popover open, respecting a 6-hour cache) the app queries
-`api.github.com/repos/JohnDimou/ClaudeCodeUsageBar/releases/latest`, compares
+`api.github.com/repos/JohnDimou/ClaudeWatch/releases/latest`, compares
 `tag_name` against the installed `CFBundleShortVersionString` using a semver
 compare, and surfaces a banner when a newer stable release is published. The
 user taps **Download** to open the release page in their browser — the app
@@ -153,15 +153,15 @@ would reject any automated replace).
 ## Project Structure
 
 ```
-ClaudeCodeUsageBar/
-├── ClaudeUsageBar/
-│   ├── ClaudeUsageBarApp.swift    # App entry point & menu bar setup
+ClaudeWatch/
+├── ClaudeWatch/
+│   ├── ClaudeWatchApp.swift    # App entry point & menu bar setup
 │   ├── UsageManager.swift          # Usage data fetching, parsing & settings
 │   ├── UsagePopoverView.swift      # SwiftUI popup, Last 24h card, update banner
 │   ├── UpdateChecker.swift         # GitHub release polling + semver compare
 │   └── Info.plist                  # App configuration
 ├── get_claude_usage.py             # Python script for CLI interaction
-├── ClaudeUsageBar.xcodeproj/       # Xcode project
+├── ClaudeWatch.xcodeproj/       # Xcode project
 ├── LICENSE                         # MIT License
 └── README.md
 ```

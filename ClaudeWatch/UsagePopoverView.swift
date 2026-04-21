@@ -1,6 +1,6 @@
 //
 //  UsagePopoverView.swift
-//  ClaudeUsageBar
+//  ClaudeWatch
 //
 //  The main popup view displaying Claude usage statistics
 //  with a modern glassmorphic design and dark mode support.
@@ -150,7 +150,7 @@ struct UsagePopoverView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Claude Code Usage")
+                    Text("ClaudeWatch")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(.primary)
 
@@ -579,7 +579,7 @@ struct UsagePopoverView: View {
         VStack(spacing: 10) {
             // Star on GitHub button
             Button(action: {
-                if let url = URL(string: "https://github.com/JohnDimou/ClaudeCodeUsageBar") {
+                if let url = URL(string: "https://github.com/JohnDimou/ClaudeWatch") {
                     NSWorkspace.shared.open(url)
                 }
             }) {
@@ -789,7 +789,7 @@ struct InfoDetailView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             SettingsHeader(title: "Application", icon: "app.badge")
                             VStack(alignment: .leading, spacing: 6) {
-                                InfoDetailRow(label: "Version", value: "1.5.0")
+                                InfoDetailRow(label: "Version", value: "1.6.0")
                                 InfoDetailRow(label: "Platform", value: "macOS 13.0+")
                                 InfoDetailRow(label: "Framework", value: "SwiftUI")
                                 InfoDetailRow(label: "License", value: "MIT")
@@ -826,8 +826,8 @@ struct InfoDetailView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             SettingsHeader(title: "Links", icon: "link")
                             VStack(alignment: .leading, spacing: 8) {
-                                LinkRow(title: "GitHub Repository", url: "https://github.com/JohnDimou/ClaudeCodeUsageBar", icon: "star.fill")
-                                LinkRow(title: "Report Issue", url: "https://github.com/JohnDimou/ClaudeCodeUsageBar/issues", icon: "exclamationmark.bubble")
+                                LinkRow(title: "GitHub Repository", url: "https://github.com/JohnDimou/ClaudeWatch", icon: "star.fill")
+                                LinkRow(title: "Report Issue", url: "https://github.com/JohnDimou/ClaudeWatch/issues", icon: "exclamationmark.bubble")
                                 LinkRow(title: "OptimalVersion.io", url: "https://optimalversion.io", icon: "globe")
                             }
                         }

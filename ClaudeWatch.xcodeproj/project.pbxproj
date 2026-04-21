@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		001 /* ClaudeUsageBarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 101; };
+		001 /* ClaudeWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 101; };
 		002 /* UsageManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 102; };
 		003 /* UsagePopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 103; };
 		004 /* get_claude_usage.py in Resources */ = {isa = PBXBuildFile; fileRef = 105; };
@@ -16,14 +16,14 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		101 /* ClaudeUsageBarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeUsageBarApp.swift; sourceTree = "<group>"; };
+		101 /* ClaudeWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeWatchApp.swift; sourceTree = "<group>"; };
 		102 /* UsageManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageManager.swift; sourceTree = "<group>"; };
 		103 /* UsagePopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsagePopoverView.swift; sourceTree = "<group>"; };
 		104 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		105 /* get_claude_usage.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; name = get_claude_usage.py; path = ../get_claude_usage.py; sourceTree = "<group>"; };
 		106 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		107 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
-		200 /* ClaudeUsageBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClaudeUsageBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		200 /* ClaudeWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClaudeWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -40,15 +40,15 @@
 		400 = {
 			isa = PBXGroup;
 			children = (
-				401 /* ClaudeUsageBar */,
+				401 /* ClaudeWatch */,
 				402 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		401 /* ClaudeUsageBar */ = {
+		401 /* ClaudeWatch */ = {
 			isa = PBXGroup;
 			children = (
-				101 /* ClaudeUsageBarApp.swift */,
+				101 /* ClaudeWatchApp.swift */,
 				102 /* UsageManager.swift */,
 				103 /* UsagePopoverView.swift */,
 				107 /* UpdateChecker.swift */,
@@ -56,13 +56,13 @@
 				105 /* get_claude_usage.py */,
 				104 /* Info.plist */,
 			);
-			path = ClaudeUsageBar;
+			path = ClaudeWatch;
 			sourceTree = "<group>";
 		};
 		402 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				200 /* ClaudeUsageBar.app */,
+				200 /* ClaudeWatch.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,9 +70,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		500 /* ClaudeUsageBar */ = {
+		500 /* ClaudeWatch */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 601 /* Build configuration list for PBXNativeTarget "ClaudeUsageBar" */;
+			buildConfigurationList = 601 /* Build configuration list for PBXNativeTarget "ClaudeWatch" */;
 			buildPhases = (
 				501 /* Sources */,
 				301 /* Frameworks */,
@@ -82,9 +82,9 @@
 			);
 			dependencies = (
 			);
-			name = ClaudeUsageBar;
-			productName = ClaudeUsageBar;
-			productReference = 200 /* ClaudeUsageBar.app */;
+			name = ClaudeWatch;
+			productName = ClaudeWatch;
+			productReference = 200 /* ClaudeWatch.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -102,7 +102,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 602 /* Build configuration list for PBXProject "ClaudeUsageBar" */;
+			buildConfigurationList = 602 /* Build configuration list for PBXProject "ClaudeWatch" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -115,7 +115,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				500 /* ClaudeUsageBar */,
+				500 /* ClaudeWatch */,
 			);
 		};
 /* End PBXProject section */
@@ -137,7 +137,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				001 /* ClaudeUsageBarApp.swift in Sources */,
+				001 /* ClaudeWatchApp.swift in Sources */,
 				002 /* UsageManager.swift in Sources */,
 				003 /* UsagePopoverView.swift in Sources */,
 				006 /* UpdateChecker.swift in Sources */,
@@ -277,7 +277,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = ClaudeUsageBar/Info.plist;
+				INFOPLIST_FILE = ClaudeWatch/Info.plist;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMainStoryboardFile = "";
@@ -288,7 +288,7 @@
 				);
 				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.optimalversion.claudeusagebar;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = ClaudeWatch;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -306,7 +306,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = ClaudeUsageBar/Info.plist;
+				INFOPLIST_FILE = ClaudeWatch/Info.plist;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMainStoryboardFile = "";
@@ -317,7 +317,7 @@
 				);
 				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.optimalversion.claudeusagebar;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = ClaudeWatch;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -326,7 +326,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		601 /* Build configuration list for PBXNativeTarget "ClaudeUsageBar" */ = {
+		601 /* Build configuration list for PBXNativeTarget "ClaudeWatch" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				702 /* Debug */,
@@ -335,7 +335,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		602 /* Build configuration list for PBXProject "ClaudeUsageBar" */ = {
+		602 /* Build configuration list for PBXProject "ClaudeWatch" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				700 /* Debug */,

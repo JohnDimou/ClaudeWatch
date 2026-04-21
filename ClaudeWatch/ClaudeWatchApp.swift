@@ -1,6 +1,6 @@
 //
-//  ClaudeUsageBarApp.swift
-//  ClaudeUsageBar
+//  ClaudeWatchApp.swift
+//  ClaudeWatch
 //
 //  A macOS menu bar app that displays Claude Code usage statistics.
 //  Shows session and weekly usage percentages in the status bar,
@@ -21,7 +21,7 @@ import AppKit
 // MARK: - App Entry Point
 
 @main
-struct ClaudeUsageBarApp: App {
+struct ClaudeWatchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {

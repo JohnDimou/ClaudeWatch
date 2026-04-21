@@ -1,6 +1,6 @@
 //
 //  UsageManager.swift
-//  ClaudeUsageBar
+//  ClaudeWatch
 //
 //  Manages fetching and parsing Claude Code usage data.
 //  Runs the bundled Python script that interacts with Claude CLI
