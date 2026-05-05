@@ -323,17 +323,76 @@ class UsageManager: ObservableObject {
         }
     }
 
-    /// Finds the Python script in the app bundle or same directory
+    /// Returns a runnable path to the Python script.
+    ///
+    /// We don't run the script directly out of the app bundle, because if
+    /// the user keeps ClaudeWatch.app inside a TCC-protected folder
+    /// (Desktop, Documents, Downloads, iCloud Drive, etc.), `/usr/bin/python3`
+    /// — which is a foreign binary, not entitled by our app — triggers a
+    /// "allow access to your Desktop" prompt every single poll cycle.
+    ///
+    /// Caches directory is not TCC-protected, so we mirror the bundled
+    /// script there once per launch (refreshed when the bundle's copy
+    /// changes) and execute Python against that copy.
     private func findScriptPath() -> String? {
-        let possiblePaths = [
-            // Inside app bundle (for distribution)
+        guard let bundledPath = bundledScriptPath() else { return nil }
+        return mirrorScriptToCaches(from: bundledPath) ?? bundledPath
+    }
+
+    /// Locate the script as shipped in the bundle (or alongside it for dev).
+    private func bundledScriptPath() -> String? {
+        let candidates = [
             Bundle.main.path(forResource: "get_claude_usage", ofType: "py"),
-            // Same directory as app (for development)
             Bundle.main.bundleURL.deletingLastPathComponent()
                 .appendingPathComponent(scriptName).path
         ].compactMap { $0 }
+        return candidates.first { FileManager.default.fileExists(atPath: $0) }
+    }
 
-        return possiblePaths.first { FileManager.default.fileExists(atPath: $0) }
+    /// Copy the script into ~/Library/Caches/<bundleID>/ so Python can
+    /// read it without triggering Desktop/Documents TCC prompts. Re-copies
+    /// when the source's modification date or size differs from the cached
+    /// copy, so script updates ship with each app version automatically.
+    private func mirrorScriptToCaches(from source: String) -> String? {
+        let fm = FileManager.default
+        let bundleID = Bundle.main.bundleIdentifier ?? "io.optimalversion.claudewatch"
+
+        guard let cachesDir = fm.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let appCacheDir = cachesDir.appendingPathComponent(bundleID, isDirectory: true)
+        let destURL = appCacheDir.appendingPathComponent("get_claude_usage.py")
+
+        do {
+            try fm.createDirectory(at: appCacheDir, withIntermediateDirectories: true)
+
+            let srcAttrs = try fm.attributesOfItem(atPath: source)
+            let srcSize = (srcAttrs[.size] as? NSNumber)?.intValue ?? -1
+            let srcMtime = srcAttrs[.modificationDate] as? Date
+
+            var needsCopy = true
+            if fm.fileExists(atPath: destURL.path) {
+                let dstAttrs = try fm.attributesOfItem(atPath: destURL.path)
+                let dstSize = (dstAttrs[.size] as? NSNumber)?.intValue ?? -2
+                let dstMtime = dstAttrs[.modificationDate] as? Date
+                if dstSize == srcSize && dstMtime == srcMtime {
+                    needsCopy = false
+                }
+            }
+
+            if needsCopy {
+                if fm.fileExists(atPath: destURL.path) {
+                    try fm.removeItem(at: destURL)
+                }
+                try fm.copyItem(atPath: source, toPath: destURL.path)
+            }
+
+            return destURL.path
+        } catch {
+            // Fall back to the bundled path; worst case the prompt still
+            // appears, but the app keeps working.
+            return nil
+        }
     }
 
     /// Finds the Python 3 interpreter

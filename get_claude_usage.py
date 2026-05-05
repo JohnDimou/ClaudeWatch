@@ -98,11 +98,21 @@ def get_usage():
         stdout=slave,
         stderr=slave,
         close_fds=True,
+        # Run from a neutral directory so claude doesn't scan the parent
+        # app's cwd for CLAUDE.md / project files. When ClaudeWatch is
+        # launched from the user's Desktop (or any TCC-protected folder),
+        # an inherited cwd would trigger a Desktop/Documents permission
+        # prompt every poll cycle.
+        cwd='/tmp',
         env={
             **{k: v for k, v in os.environ.items() if k != 'CLAUDECODE'},
             'TERM': 'xterm-256color',
             'COLUMNS': '200',
             'LINES': '50',
+            # Strip directory hints so claude can't backtrack to a
+            # protected folder via $PWD or $OLDPWD.
+            'PWD': '/tmp',
+            'OLDPWD': '/tmp',
         },
     )
 
@@ -394,8 +404,12 @@ def parse_usage(text):
 
     # -----------------------------------------------------------------
     # Anchor on the last "Last 24h" header and walk backwards to find
-    # each preceding section's start. This tolerates multiple terminal
-    # redraws by always picking the latest coherent set of headers.
+    # each preceding section's start. The header anchor uses the LAST
+    # render (which has the Sonnet section populated — earlier renders
+    # may show "Scanning local sessions" instead).
+    #
+    # The Last-24h INSIGHTS themselves are picked from whichever render
+    # produced the most coherent bullets — see lower in this function.
     # -----------------------------------------------------------------
     last24h_matches = list(re.finditer(r'last\s*24\s*h', clean, re.IGNORECASE))
     if last24h_matches:
@@ -405,10 +419,14 @@ def parse_usage(text):
         last24h_start = len(clean)
         last24h_end = len(clean)
 
-    # Tolerate degraded sonnet header ("Sonet nly") seen in late redraws.
+    # Tolerate degraded sonnet header. Late redraws have been seen as
+    # "Sonet nly", "Son et nly", "S nnet only" — basically any cell-split
+    # variation. Match "Current week" + a parenthesized blob whose words
+    # together start with "son" and end with "only"/"nly".
     sonnet_header = (
-        r'current\s*week\s*\(?\s*sonnet\s*only\s*\)?'
-        r'|current\s*week\s*\(?\s*son[a-z]*\s*(?:only|nly)\s*\)?'
+        r'current\s*week\s*\(?\s*'
+        r'son[a-z]*(?:\s+[a-z]{1,4})*\s*'
+        r'(?:only|nly|nl|ly)\s*\)?'
     )
     sonnet_m = _last_match_before(sonnet_header, clean, last24h_start)
     sonnet_start = sonnet_m.start() if sonnet_m else last24h_start
@@ -454,51 +472,86 @@ def parse_usage(text):
     # the next bullet starting at the next percentage in the section.
     # If Anthropic rewords, reorders, adds or removes bullets, this
     # logic still picks them up.
+    #
+    # The new "Current session" live bar (introduced ~v2.1.x) triggers
+    # an extra terminal redraw that often degrades the bottom of the
+    # box ("96%" → "96 w s", "80%" → "80 essio s"). Picking the LAST
+    # render's Last-24h section then loses bullets. So we evaluate
+    # EVERY Last-24h section in the buffer and use the one with the
+    # most well-formed bullets — typically the first paint.
     # -----------------------------------------------------------------
-    reflowed = _reflow(last24h_block)
-
-    # Drop the interactive-footer hints so we don't read past the box.
-    # These are short, known single-letter prompts — not insight content.
-    footer = re.search(
-        r'\bd\s*to\s*day\b|\bw\s*to\s*week\b|\besc\s*to\s*cancel\b|\brefreshing\b',
-        reflowed,
-        re.IGNORECASE,
-    )
-    if footer:
-        reflowed = reflowed[:footer.start()]
-
-    # Every percentage in the block (0-100 only, ignoring huge numbers).
-    pct_matches = [
-        m for m in re.finditer(r'(\d{1,3})\s*%', reflowed)
-        if int(m.group(1)) <= 100
-    ]
-
-    insights = []
-    for i, m in enumerate(pct_matches):
-        percent = int(m.group(1))
-        body_start = m.end()
-        body_end = pct_matches[i + 1].start() if i + 1 < len(pct_matches) else len(reflowed)
-        body = reflowed[body_start:body_end].strip()
-
-        # Skip short/empty segments — likely a stray percentage embedded
-        # inside a description rather than a real bullet (heuristic
-        # threshold; avoids noise without hardcoding any words).
-        if len(body) < 15:
-            continue
-
-        title, description = _split_title_description(body)
-        title = _tidy_title(title)
-        description = _tidy_desc(description)
-        if title:
-            insights.append({
-                "percent": percent,
-                "title": title,
-                "description": description,
-            })
-
+    insights = _extract_best_insights(clean, last24h_matches)
     result["insights"] = insights
 
     return result
+
+
+def _extract_best_insights(clean, last24h_matches):
+    """Pick the Last-24h section that yields the most bullets.
+
+    Iterates through every "Last 24h" header in the buffer, builds a
+    candidate section ending at either the next "Last 24h" header or a
+    footer/control hint, and returns the bullet list from whichever
+    candidate is most complete. Ties break toward the EARLIEST
+    occurrence — initial paints tend to be cleaner than redraws.
+    """
+    if not last24h_matches:
+        return []
+
+    best = []
+    for i, header in enumerate(last24h_matches):
+        section_start = header.end()
+        section_end = (
+            last24h_matches[i + 1].start()
+            if i + 1 < len(last24h_matches)
+            else len(clean)
+        )
+        section = clean[section_start:section_end]
+
+        reflowed = _reflow(section)
+        footer = re.search(
+            r'\bd\s*to\s*day\b|\bw\s*to\s*week\b|\besc\s*to\s*cancel\b|\brefreshing\b',
+            reflowed,
+            re.IGNORECASE,
+        )
+        if footer:
+            reflowed = reflowed[:footer.start()]
+
+        pct_matches = [
+            m for m in re.finditer(r'(\d{1,3})\s*%', reflowed)
+            if int(m.group(1)) <= 100
+        ]
+
+        candidate = []
+        for j, m in enumerate(pct_matches):
+            percent = int(m.group(1))
+            body_start = m.end()
+            body_end = (
+                pct_matches[j + 1].start()
+                if j + 1 < len(pct_matches)
+                else len(reflowed)
+            )
+            body = reflowed[body_start:body_end].strip()
+
+            # Skip short/empty segments — likely a stray percentage
+            # embedded in a description, not a real bullet.
+            if len(body) < 15:
+                continue
+
+            title, description = _split_title_description(body)
+            title = _tidy_title(title)
+            description = _tidy_desc(description)
+            if title:
+                candidate.append({
+                    "percent": percent,
+                    "title": title,
+                    "description": description,
+                })
+
+        if len(candidate) > len(best):
+            best = candidate
+
+    return best
 
 
 def _split_title_description(body):
