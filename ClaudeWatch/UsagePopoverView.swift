@@ -330,7 +330,7 @@ struct UsagePopoverView: View {
             countdownText: timeUntilReset(usage.sessionReset),
             gradient: gradient,
             icon: "clock.fill",
-            iconBackground: [gradient[0].opacity(0.25), gradient[1].opacity(0.25)]
+            iconBackground: gradient
         )
     }
 
@@ -343,7 +343,7 @@ struct UsagePopoverView: View {
             countdownText: timeUntilReset(usage.weeklyReset),
             gradient: gradient,
             icon: "calendar",
-            iconBackground: [gradient[0].opacity(0.25), gradient[1].opacity(0.25)]
+            iconBackground: gradient
         )
     }
 
@@ -359,7 +359,7 @@ struct UsagePopoverView: View {
             countdownText: timeUntilReset(resetSource),
             gradient: gradient,
             icon: "sparkles",
-            iconBackground: [gradient[0].opacity(0.25), gradient[1].opacity(0.25)]
+            iconBackground: gradient
         )
     }
 
@@ -384,19 +384,14 @@ struct UsagePopoverView: View {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(
                                 LinearGradient(
-                                    colors: [Color(hex: "d97757").opacity(0.25), Color(hex: "b85c3b").opacity(0.25)],
+                                    colors: [Color(hex: "d97757"), Color(hex: "b85c3b")],
                                     startPoint: .topLeading, endPoint: .bottomTrailing
                                 )
                             )
                             .frame(width: 30, height: 30)
                         Image(systemName: "chart.bar.xaxis")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(
-                                LinearGradient(
-                                    colors: [Color(hex: "d97757"), Color(hex: "b85c3b")],
-                                    startPoint: .topLeading, endPoint: .bottomTrailing
-                                )
-                            )
+                            .foregroundColor(.white)
                     }
 
                     VStack(alignment: .leading, spacing: 1) {
@@ -492,14 +487,14 @@ struct UsagePopoverView: View {
         VStack(spacing: 20) {
             ZStack {
                 Circle()
-                    .fill(Color.orange.opacity(0.1))
+                    .fill(
+                        LinearGradient(colors: [.orange, .red], startPoint: .top, endPoint: .bottom)
+                    )
                     .frame(width: 80, height: 80)
 
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 36))
-                    .foregroundStyle(
-                        LinearGradient(colors: [.orange, .red], startPoint: .top, endPoint: .bottom)
-                    )
+                    .foregroundColor(.white)
             }
 
             VStack(spacing: 8) {
@@ -537,12 +532,12 @@ struct UsagePopoverView: View {
         VStack(spacing: 20) {
             ZStack {
                 Circle()
-                    .fill(Color.blue.opacity(0.1))
+                    .fill(Color.blue)
                     .frame(width: 80, height: 80)
 
                 Image(systemName: "chart.bar.doc.horizontal")
                     .font(.system(size: 36))
-                    .foregroundColor(.blue)
+                    .foregroundColor(.white)
             }
 
             VStack(spacing: 8) {
@@ -656,9 +651,7 @@ struct EnhancedUsageCard: View {
 
                         Image(systemName: icon)
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(
-                                LinearGradient(colors: gradient, startPoint: .topLeading, endPoint: .bottomTrailing)
-                            )
+                            .foregroundColor(.white)
                     }
 
                     VStack(alignment: .leading, spacing: 2) {
@@ -1231,19 +1224,14 @@ struct UpdateBanner: View {
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [Color(hex: "d97757").opacity(0.30), Color(hex: "b85c3b").opacity(0.30)],
+                            colors: [Color(hex: "d97757"), Color(hex: "b85c3b")],
                             startPoint: .topLeading, endPoint: .bottomTrailing
                         )
                     )
                     .frame(width: 32, height: 32)
                 Image(systemName: "sparkles")
                     .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [Color(hex: "d97757"), Color(hex: "b85c3b")],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
+                    .foregroundColor(.white)
             }
 
             VStack(alignment: .leading, spacing: 4) {

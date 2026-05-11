@@ -517,6 +517,17 @@ def _extract_best_insights(clean, last24h_matches):
         if footer:
             reflowed = reflowed[:footer.start()]
 
+        # Cut at sub-section tables like "Skills % of usage" or
+        # "Plugins % of usage". Their rows have the form "<name>  <N>%"
+        # (percent at the END), so they must not contribute insight
+        # bullets — which by definition start with a percentage.
+        subsection = re.search(
+            r'\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,3}\s+%\s+of\s+usage\b',
+            reflowed,
+        )
+        if subsection:
+            reflowed = reflowed[:subsection.start()]
+
         pct_matches = [
             m for m in re.finditer(r'(\d{1,3})\s*%', reflowed)
             if int(m.group(1)) <= 100
