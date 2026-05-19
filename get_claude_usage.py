@@ -22,6 +22,10 @@ Output:
         - percent (int): Percentage value (0-100)
         - title (str): Short title as rendered by the CLI
         - description (str): Follow-up explanation (may be empty)
+    - notes (list): Dynamic array of Last-24h sub-sections that have no
+      percentage column (e.g. "Skills, subagents, and plugins"), each with:
+        - heading (str): Section heading as rendered by the CLI
+        - body (str): Explanatory text under the heading (may be empty)
     - raw (str): Cleaned tail of output for debugging
     - error (str): Error message if something went wrong (absent on success)
 
@@ -378,6 +382,7 @@ def parse_usage(text):
         "plan": "",
         "model": "",
         "insights": [],
+        "notes": [],
         "raw": "",
     }
 
@@ -480,25 +485,33 @@ def parse_usage(text):
     # EVERY Last-24h section in the buffer and use the one with the
     # most well-formed bullets — typically the first paint.
     # -----------------------------------------------------------------
-    insights = _extract_best_insights(clean, last24h_matches)
+    insights, notes = _extract_best_insights(clean, last24h_matches)
     result["insights"] = insights
+    result["notes"] = notes
 
     return result
 
 
 def _extract_best_insights(clean, last24h_matches):
-    """Pick the Last-24h section that yields the most bullets.
+    """Pick the Last-24h section that yields the richest structure.
 
     Iterates through every "Last 24h" header in the buffer, builds a
     candidate section ending at either the next "Last 24h" header or a
-    footer/control hint, and returns the bullet list from whichever
-    candidate is most complete. Ties break toward the EARLIEST
-    occurrence — initial paints tend to be cleaner than redraws.
+    footer/control hint, and returns the bullet/note pair from whichever
+    candidate is most complete. Returns a tuple `(insights, notes)`.
+
+    Inside Last-24h, the CLI separates each sub-section with a blank
+    line. Sub-sections that start with "NN%" are insight bullets; those
+    that start with a Capitalized heading (e.g. "Skills, subagents, and
+    plugins") are *notes* — explanatory blocks with no percent. We pick
+    the render that yields the most bullets; ties break toward the
+    render that also surfaces the most notes.
     """
     if not last24h_matches:
-        return []
+        return [], []
 
-    best = []
+    best_insights = []
+    best_notes = []
     for i, header in enumerate(last24h_matches):
         section_start = header.end()
         section_end = (
@@ -517,10 +530,9 @@ def _extract_best_insights(clean, last24h_matches):
         if footer:
             reflowed = reflowed[:footer.start()]
 
-        # Cut at sub-section tables like "Skills % of usage" or
-        # "Plugins % of usage". Their rows have the form "<name>  <N>%"
-        # (percent at the END), so they must not contribute insight
-        # bullets — which by definition start with a percentage.
+        # Drop any "<Name> % of usage" table form up front — its rows have
+        # the percent at the END (e.g. "MyPlugin  5%") and would otherwise
+        # add noise to the paragraph split.
         subsection = re.search(
             r'\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,3}\s+%\s+of\s+usage\b',
             reflowed,
@@ -528,41 +540,98 @@ def _extract_best_insights(clean, last24h_matches):
         if subsection:
             reflowed = reflowed[:subsection.start()]
 
-        pct_matches = [
-            m for m in re.finditer(r'(\d{1,3})\s*%', reflowed)
-            if int(m.group(1)) <= 100
-        ]
+        # Each sub-section sits in its own paragraph (blank-line separated)
+        paragraphs = [p for p in re.split(r'\n\s*\n', reflowed) if p.strip()]
 
-        candidate = []
-        for j, m in enumerate(pct_matches):
-            percent = int(m.group(1))
-            body_start = m.end()
-            body_end = (
-                pct_matches[j + 1].start()
-                if j + 1 < len(pct_matches)
-                else len(reflowed)
+        candidate_insights = []
+        candidate_notes = []
+        for para in paragraphs:
+            # A bullet's "NN%" may follow intro prose without a paragraph
+            # break — the section subtitle ("these are independent
+            # characteristics of your usage, not a breakdown") often
+            # shares a line with the first bullet. Search anywhere in the
+            # paragraph and require a substantial body so a stray percent
+            # inside note prose can't masquerade as a bullet.
+            bullet = re.search(
+                r'(\d{1,3})\s*%\s+(.{15,})',
+                para,
+                re.DOTALL,
             )
-            body = reflowed[body_start:body_end].strip()
+            if bullet and int(bullet.group(1)) <= 100:
+                percent = int(bullet.group(1))
+                body = bullet.group(2).strip()
+                title, description = _split_bullet_body(body)
+                title = _tidy_title(title)
+                description = _tidy_desc(description)
+                if title:
+                    candidate_insights.append({
+                        "percent": percent,
+                        "title": title,
+                        "description": description,
+                    })
+                    continue
+            note = _parse_note(para)
+            if note:
+                candidate_notes.append(note)
 
-            # Skip short/empty segments — likely a stray percentage
-            # embedded in a description, not a real bullet.
-            if len(body) < 15:
-                continue
+        better = (
+            len(candidate_insights) > len(best_insights)
+            or (
+                len(candidate_insights) == len(best_insights)
+                and len(candidate_notes) > len(best_notes)
+            )
+        )
+        if better:
+            best_insights = candidate_insights
+            best_notes = candidate_notes
 
-            title, description = _split_title_description(body)
-            title = _tidy_title(title)
-            description = _tidy_desc(description)
-            if title:
-                candidate.append({
-                    "percent": percent,
-                    "title": title,
-                    "description": description,
-                })
+    return best_insights, best_notes
 
-        if len(candidate) > len(best):
-            best = candidate
 
-    return best
+def _split_bullet_body(body):
+    """Split bullet body into (title, description).
+
+    Prefers the first newline as the boundary — the CLI normally breaks
+    the line between the bullet's headline and its explanatory sentence.
+    Falls back to the legacy capitalization heuristic when wrap removed
+    the newline (e.g. when the entire bullet fits on one PTY column row).
+    """
+    nl = body.find('\n')
+    if nl > 10:
+        title = re.sub(r'\s+', ' ', body[:nl]).strip()
+        description = re.sub(r'\s+', ' ', body[nl + 1:]).strip()
+        if title:
+            return title, description
+    return _split_title_description(re.sub(r'\s+', ' ', body))
+
+
+def _parse_note(para):
+    """Parse a non-bullet paragraph as a (heading, body) note.
+
+    Notes are no-percent sub-sections inside Last-24h, like
+    "Skills, subagents, and plugins\\n<explanation>". The first short,
+    capitalized line becomes the heading; remaining lines are joined as
+    the body. Returns None if the paragraph doesn't look like a heading
+    block (avoids picking up stray prose).
+    """
+    lines = [l.strip() for l in re.split(r'\n+', para) if l.strip()]
+    if not lines:
+        return None
+    heading = lines[0]
+    if re.match(r'^\d+\s*%', heading):
+        return None
+    if not re.match(r'^[A-Z]', heading):
+        return None
+    if len(heading) > 80:
+        return None
+    body = ' '.join(lines[1:])
+    body = re.sub(r' +', ' ', body).strip(' .,')
+    if body and body[-1] not in '.!?':
+        body += '.'
+    return {
+        "heading": heading.rstrip('.,').strip(),
+        "body": body,
+    }
 
 
 def _split_title_description(body):

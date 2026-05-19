@@ -72,8 +72,9 @@ claude --version
 ### Option 1: Download Release (Recommended)
 
 1. Download the latest `.app` from [Releases](../../releases)
-2. Move `ClaudeWatch.app` to your Applications folder
-3. Open the app (you may need to right-click → Open the first time due to Gatekeeper)
+2. **Move `ClaudeWatch.app` into `/Applications`** — not Desktop, Downloads, or Documents. This step is important: macOS treats the first three as TCC-protected folders, and an app running from inside one will keep re-asking for "access to your Desktop / Documents / Downloads" on every refresh. Installing into `/Applications` keeps the bundle path stable and outside TCC's protected list, so the permission you grant on first launch *sticks*.
+3. Open the app (right-click → Open the first time to bypass Gatekeeper)
+4. When macOS prompts for folder access on first launch, click **Allow** once. The grant is stored against the app's signature at its `/Applications` path and won't be asked again.
 
 ### Option 2: Build from Source
 
@@ -213,15 +214,30 @@ brew install python3
 - Run `claude` in terminal and verify it works
 - Check that you have a Pro/Max subscription
 
-### Unexpected permission prompts (Photos, Music, Desktop, etc.)
-If you see macOS permission dialogs asking for access to Photos, Music, OneDrive, Desktop, or other folders:
-- **This should not happen with v1.2.0+** - we fixed issues where the subprocess could trigger these prompts
-- Try downloading the latest release
-- If the issue persists, please [open an issue](../../issues) with:
-  - Screenshot of the permission dialog
-  - macOS version
-  - App version
-  - Any relevant details about your setup (iCloud sync, OneDrive, etc.)
+### macOS keeps asking for Desktop / Documents / Downloads access
+
+If the same folder-permission dialog keeps coming back every refresh — even after clicking **Allow** — the cause is almost always one of these:
+
+1. **The `.app` is living inside a TCC-protected folder.** If ClaudeWatch.app is on your Desktop, in Downloads, in Documents, or in iCloud Drive, macOS will re-trigger the prompt every poll cycle. **Move it to `/Applications` and relaunch.** This alone fixes 90% of cases.
+
+2. **An older grant is pinned to a stale code-signing hash.** macOS records each permission grant against the app's signature at the time of approval. If you previously installed an older build (or a development build), TCC may still be holding a grant tied to that old hash and refuses to reuse it for the current build. Reset the stale entry from Terminal:
+   ```bash
+   tccutil reset SystemPolicyDesktopFolder io.optimalversion.claudeusagebar
+   tccutil reset SystemPolicyDocumentsFolder io.optimalversion.claudeusagebar
+   tccutil reset SystemPolicyDownloadsFolder io.optimalversion.claudeusagebar
+   ```
+   Then relaunch the app and click **Allow** on the fresh prompt. The new grant will bind to the current signature and stay.
+
+3. **You have an old `ClaudeUsageBar.app` (pre-rebrand) hanging around.** Delete it — it's no longer maintained:
+   ```bash
+   rm -rf /Applications/ClaudeUsageBar.app
+   ```
+
+If after all three steps the prompt **still** returns, please [open an issue](../../issues) with:
+- Screenshot of the permission dialog
+- macOS version and app version
+- Output of `ls -ld /Applications/ClaudeWatch.app` and `codesign -dv /Applications/ClaudeWatch.app 2>&1 | head -5`
+- Any relevant setup details (iCloud Drive sync, OneDrive, Jamf/MDM, etc.)
 
 ## Privacy & Security
 

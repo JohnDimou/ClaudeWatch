@@ -51,7 +51,7 @@ struct UsagePopoverView: View {
                                 sessionCard(usage)
                                 weeklyCard(usage)
                                 sonnetCard(usage)
-                                if !usage.insights.isEmpty {
+                                if !usage.insights.isEmpty || !usage.notes.isEmpty {
                                     last24hCard(usage)
                                 }
                                 executionInfoCard(usage)
@@ -414,6 +414,16 @@ struct UsagePopoverView: View {
                             tint: Self.insightPalette[index % Self.insightPalette.count],
                             insight: insight
                         )
+                    }
+                }
+
+                if !usage.notes.isEmpty {
+                    Divider().background(Color.primary.opacity(0.1))
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(usage.notes) { note in
+                            NoteRow(note: note)
+                        }
                     }
                 }
             }
@@ -1374,6 +1384,55 @@ struct NumberedInsightRow: View {
                         .opacity.combined(with: .move(edge: .top))
                     )
             }
+        }
+    }
+}
+
+/// A Last-24h sub-section that the CLI emits without a percentage column
+/// (e.g. "Skills, subagents, and plugins"). Rendered as a quiet info row
+/// with an icon, bold heading, and muted explanatory body — visually
+/// distinct from numbered percentage bullets but still inside the Last 24h
+/// card so the user reads it in context.
+struct NoteRow: View {
+    let note: UsageNote
+
+    private var hasBody: Bool { !note.body.isEmpty }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(hex: "d97757").opacity(0.22),
+                                Color(hex: "d97757").opacity(0.10),
+                            ],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 22, height: 22)
+                Image(systemName: "info.circle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(Color(hex: "d97757"))
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(note.heading)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if hasBody {
+                    Text(note.body)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer(minLength: 0)
         }
     }
 }

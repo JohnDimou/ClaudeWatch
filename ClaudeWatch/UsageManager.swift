@@ -44,6 +44,33 @@ struct UsageInsight: Identifiable, Codable {
     }
 }
 
+/// A Last-24h sub-section that has no percentage column (e.g. the
+/// "Skills, subagents, and plugins" block introduced in Claude CLI
+/// 2.1.x). Sourced structurally — any future no-percent heading the
+/// CLI emits surfaces here automatically.
+struct UsageNote: Identifiable, Codable {
+    let id: UUID
+    let heading: String
+    let body: String
+
+    enum CodingKeys: String, CodingKey {
+        case heading, body
+    }
+
+    init(heading: String, body: String) {
+        self.id = UUID()
+        self.heading = heading
+        self.body = body
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = UUID()
+        self.heading = try c.decodeIfPresent(String.self, forKey: .heading) ?? ""
+        self.body = try c.decodeIfPresent(String.self, forKey: .body) ?? ""
+    }
+}
+
 /// Represents Claude Code usage statistics
 struct ClaudeUsage {
     /// Current session usage percentage (0-100)
@@ -67,6 +94,10 @@ struct ClaudeUsage {
     /// Dynamic Last-24h insights (any count, sourced from CLI output)
     var insights: [UsageInsight] = []
 
+    /// Dynamic Last-24h no-percent sub-sections (e.g. "Skills, subagents,
+    /// and plugins"). Surfaced under the insights card.
+    var notes: [UsageNote] = []
+
     /// Plan name shown in the CLI status line (e.g., "Claude Max"); empty if unknown.
     var plan: String = ""
 
@@ -89,6 +120,7 @@ struct UsageJSON: Codable {
     let sonnet_percent: Int?
     let sonnet_reset: String?
     let insights: [UsageInsight]?
+    let notes: [UsageNote]?
     let plan: String?
     let model: String?
     let raw: String?
@@ -250,8 +282,8 @@ class UsageManager: ObservableObject {
 
     /// Heuristic for an "empty" parse result. A genuine response always
     /// includes at least one reset timestamp, so if every percentage is
-    /// zero AND all reset strings are blank AND no insights landed, we
-    /// treat it as a timed-out parse.
+    /// zero AND all reset strings are blank AND no insights/notes landed,
+    /// we treat it as a timed-out parse.
     private func isLikelyEmpty(_ usage: ClaudeUsage) -> Bool {
         let noPercents = usage.sessionPercentage == 0
             && usage.weeklyPercentage == 0
@@ -259,8 +291,8 @@ class UsageManager: ObservableObject {
         let noResets = usage.sessionReset.isEmpty
             && usage.weeklyReset.isEmpty
             && usage.sonnetReset.isEmpty
-        let noInsights = usage.insights.isEmpty
-        return noPercents && noResets && noInsights
+        let noLast24h = usage.insights.isEmpty && usage.notes.isEmpty
+        return noPercents && noResets && noLast24h
     }
 
     // MARK: - Private Methods
@@ -430,6 +462,7 @@ class UsageManager: ObservableObject {
             usage.weeklyReset = usageJSON.weekly_reset ?? ""
             usage.sonnetReset = usageJSON.sonnet_reset ?? ""
             usage.insights = usageJSON.insights ?? []
+            usage.notes = usageJSON.notes ?? []
             usage.plan = usageJSON.plan ?? ""
             usage.model = usageJSON.model ?? ""
             usage.rawOutput = usageJSON.raw ?? ""
