@@ -138,9 +138,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem.button else { return }
 
         let usage = usageManager.currentUsage
-        let sessionPercent = usage?.sessionPercentage ?? 0
-        let weeklyPercent = usage?.weeklyPercentage ?? 0
-        let sonnetPercent = usage?.sonnetPercentage ?? 0
+
+        // Only buckets the CLI actually reported get a slot. Showing 0% for
+        // a bucket we have no data on is the dangerous failure — it reads as
+        // a full allowance remaining when it could be nearly exhausted — and
+        // a "—" placeholder is just noise in a glanceable menu bar. So an
+        // unreported bucket is dropped entirely, its separator with it:
+        // three buckets render as "10% | 9% | 4%", two as "10% | 9%".
+        //
+        // The per-model bucket (third slot) is the one that commonly goes
+        // missing: it loads asynchronously and not every account has one.
+        var slots: [String] = []
+        if let usage = usage {
+            if usage.sessionReported {
+                slots.append("\(Int(usage.sessionPercentage))%")
+            }
+            if usage.weeklyReported {
+                slots.append("\(Int(usage.weeklyPercentage))%")
+            }
+            if usage.modelBucketReported {
+                slots.append("\(Int(usage.modelBucketPercentage))%")
+            }
+        }
+        // With no slots yet, say why: a fetch in flight reads "Loading…",
+        // whereas a bare "—" means the fetch finished and returned nothing.
+        let slotText: String
+        if !slots.isEmpty {
+            slotText = slots.joined(separator: " | ")
+        } else if usageManager.isLoading {
+            slotText = "Loading…"
+        } else {
+            slotText = "—"
+        }
 
         // Create icon
         let attachment = NSTextAttachment()
@@ -152,7 +181,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Build attributed string: icon + all three percentages
         let iconString = NSAttributedString(attachment: attachment)
         let textString = NSAttributedString(
-            string: " \(Int(sessionPercent))% | \(Int(weeklyPercent))% | \(Int(sonnetPercent))%",
+            string: " \(slotText)",
             attributes: [
                 .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium),
                 .foregroundColor: NSColor.labelColor

@@ -96,6 +96,16 @@ def get_usage():
     except OSError:
         pass
 
+    # Drop every Claude Code session marker we may have inherited. If
+    # ClaudeWatch (or this script) is launched from inside a Claude Code
+    # session, markers like CLAUDE_CODE_CHILD_SESSION make the spawned CLI
+    # treat itself as a child session — transcript saving switches off and
+    # the "what's contributing" local-session scan behaves differently.
+    child_env = {
+        k: v for k, v in os.environ.items()
+        if not k.startswith(('CLAUDECODE', 'CLAUDE_CODE', 'CLAUDE_PID', 'AI_AGENT'))
+    }
+
     proc = subprocess.Popen(
         [claude_path],
         stdin=slave,
@@ -109,7 +119,7 @@ def get_usage():
         # prompt every poll cycle.
         cwd='/tmp',
         env={
-            **{k: v for k, v in os.environ.items() if k != 'CLAUDECODE'},
+            **child_env,
             'TERM': 'xterm-256color',
             'COLUMNS': '200',
             'LINES': '50',
@@ -158,22 +168,56 @@ def get_usage():
     read_all(0.3)
     os.write(master, b"\r")
 
-    # Wait until the "Last 24h" section renders (signal of full output)
-    # or up to 20 seconds, whichever comes first. Then read a little more
-    # to let the final box settle.
-    deadline = time.time() + 20
-    saw_last_24h = False
+    # Wait until the dialog is fully populated, or up to 20 seconds.
+    #
+    # Claude CLI 2.1.x renders the limit buckets progressively: the session
+    # and all-models rows paint immediately, but the per-model weekly bucket
+    # ("Current week (Fable)") is fetched asynchronously and lands a few
+    # seconds later, as does the "Usage credits" row. Older builds instead
+    # ended the dialog with a "Last 24h" section.
+    #
+    # So the completion signal is structural rather than textual: keep
+    # reading until we have seen at least three "NN% used" rows (session +
+    # all models + the per-model bucket), or the legacy "Last 24h" header.
+    # We deliberately do NOT match on the words "usage credits" — that
+    # phrase also appears in the /usage-credits entry of the slash-command
+    # autocomplete menu, which renders before the dialog even opens.
+    started = time.time()
+    deadline = started + 20
+    settled = False
+    last_size = len(output)
+    last_change = time.time()
+
     while time.time() < deadline:
-        read_all(1)
-        probe = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', output.decode('utf-8', errors='ignore'))
-        probe = re.sub(r'[^\x20-\x7E\n]', ' ', probe)
-        if re.search(r'last\s*24\s*h', probe, re.IGNORECASE):
-            saw_last_24h = True
-            read_all(3)
+        read_all(0.5)
+        if len(output) != last_size:
+            last_size = len(output)
+            last_change = time.time()
+
+        probe = _clean_ansi(output.decode('utf-8', errors='ignore'), keep_rows=True)
+        widest = max((len(_PCT_USED.findall(f)) for f in _frames(probe)), default=0)
+
+        # Best signal: a SINGLE paint showing all three buckets. Counting
+        # across the whole buffer would be wrong — two consecutive paints of
+        # two buckets each also total three, and breaking there exits before
+        # the per-model bucket has painted at all.
+        if widest >= 3:
+            settled = True
+            # Let the final repaint land so the bucket's reset row arrives.
+            read_all(2)
             break
 
-    # If Last 24h never appeared, still wait a total of ~12s for main data
-    if not saw_last_24h:
+        # Otherwise settle on quiescence: the dialog has painted at least the
+        # session and weekly buckets and has since stopped emitting. Waiting
+        # longer cannot help — not every account has a third bucket, and the
+        # local-session scan behind "what's contributing" may never resolve.
+        if widest >= 2 and time.time() - last_change > 2.5:
+            settled = True
+            read_all(1)
+            break
+
+    # Nothing recognisable rendered — give the main data a final chance.
+    if not settled:
         read_all(6)
 
     # Clean up
@@ -195,7 +239,7 @@ def get_usage():
 # Parsing helpers
 # ---------------------------------------------------------------------------
 
-def _clean_ansi(text):
+def _clean_ansi(text, keep_rows=False):
     """Strip ANSI, OSC, and other escape sequences; normalize whitespace.
 
     The Claude CLI draws its /usage box with cursor-positioning sequences
@@ -203,6 +247,18 @@ def _clean_ansi(text):
     we lose the visual spacing between columns and words collide into
     each other ("usagecamefrom..."). Replace them with equivalent runs
     of real spaces BEFORE the strip pass so word boundaries survive.
+
+    Two views of the same stream are produced, because the two parsers
+    want opposite things:
+
+    * ``keep_rows=False`` (default) — vertical cursor moves also become
+      spaces, giving the flowing prose view the Last-24h bullet parser
+      was written against.
+    * ``keep_rows=True`` — vertical cursor moves become newlines, so the
+      screen's row structure survives. The limit-bucket and stats parsers
+      read row by row and need this: the CLI does not always separate
+      rows with CR/LF, and some paints position purely with cursor
+      sequences, collapsing the whole dialog onto one line.
     """
     # Cursor forward N cells → N spaces
     t = re.sub(
@@ -214,8 +270,14 @@ def _clean_ansi(text):
     # so words on either side don't collide (exact column isn't important
     # for parsing, just word separation).
     t = re.sub(r'\x1b\[\d+G', ' ', t)
-    # Cursor up/down/back — treat as separators
-    t = re.sub(r'\x1b\[\d*[ABDEFHfdn]', ' ', t)
+    if keep_rows:
+        # Cursor back / device-status stay horizontal.
+        t = re.sub(r'\x1b\[\d*[Dn]', ' ', t)
+        # Vertical movement starts a new screen row.
+        t = re.sub(r'\x1b\[[\d;]*[ABEFHfd]', '\n', t)
+    else:
+        # Cursor up/down/back — treat as separators
+        t = re.sub(r'\x1b\[\d*[ABDEFHfdn]', ' ', t)
     # Now strip the remaining CSI, OSC, and 2-byte escape sequences
     t = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', t)
     t = re.sub(r'\x1b\][^\x07\x1b]*[\x07]?', '', t)
@@ -371,32 +433,109 @@ def _reflow(text):
 # ---------------------------------------------------------------------------
 
 def parse_usage(text):
-    """Parses the raw terminal output into a structured dict."""
+    """Parses the raw terminal output into a structured dict.
+
+    Strategy: the Claude CLI repaints its /usage dialog several times as
+    asynchronous data lands, and Ink only rewrites the cells that changed.
+    Concatenating every paint therefore yields a buffer full of half-drawn
+    rows ("Europe/Athe s", a bare "Fable)" whose "Current week (" prefix
+    was never redrawn). Instead of tolerating that with ever-looser
+    regexes, we split the stream into individual paints, parse each one on
+    its own, and merge field-by-field — taking the freshest value that is
+    also well-formed. See `_merge_frames`.
+    """
+    # Two views of the same capture — see `_clean_ansi`. `clean` is the
+    # flowing-prose view the Last-24h parser expects; `rows` preserves the
+    # screen's row structure for the limit-bucket and stats parsers.
+    clean = _clean_ansi(text)
+    rows = _clean_ansi(text, keep_rows=True)
+
     result = {
+        # --- limit buckets: legacy keys, unchanged meaning -------------
         "session_percent": 0,
         "session_reset": "",
         "weekly_percent": 0,
         "weekly_reset": "",
+        # `sonnet_*` predates the CLI making this bucket model-agnostic.
+        # Kept as an alias of the per-model bucket so older builds of the
+        # app keep working; new code should read `model_bucket_*`.
         "sonnet_percent": 0,
         "sonnet_reset": "",
+        # --- limit buckets: per-model, now dynamically named -----------
+        "model_bucket_name": "",
+        "model_bucket_percent": 0,
+        "model_bucket_reset": "",
+        # --- did the CLI actually render each bucket? -------------------
+        #
+        # A bucket that never painted is NOT a bucket at 0%. The per-model
+        # bucket in particular loads asynchronously and is sometimes absent
+        # entirely, and reporting that as 0% tells the user they have a full
+        # allowance left when they may have almost none. These flags let the
+        # UI distinguish "unused" from "unknown".
+        "session_reported": False,
+        "weekly_reported": False,
+        "model_bucket_reported": False,
+        # --- identity ---------------------------------------------------
         "plan": "",
         "model": "",
+        "cli_version": "",
+        # --- session stats (Claude CLI 2.1.x "Stats" block) -------------
+        "session_cost_usd": 0.0,
+        "session_api_duration": "",
+        "session_wall_duration": "",
+        "lines_added": 0,
+        "lines_removed": 0,
+        "tokens_input": 0,
+        "tokens_output": 0,
+        "tokens_cache_read": 0,
+        "tokens_cache_write": 0,
+        # --- extras ------------------------------------------------------
+        "promo_text": "",
+        "promo_url": "",
+        "credits_enabled": False,
+        "credits_text": "",
+        "contributors": [],
+        "contributors_status": "",
+        # --- legacy Last-24h behavioural section -------------------------
         "insights": [],
         "notes": [],
         "raw": "",
     }
-
-    clean = _clean_ansi(text)
     result["raw"] = clean[-1500:]
 
-    # -----------------------------------------------------------------
-    # Plan + model line, e.g. "Opus 4.7 (1M context) Claude Max"
+    _parse_identity(clean, result)
+    _merge_frames([_parse_frame(f) for f in _frames(rows)], result)
+
+    # Legacy Last-24h section — removed in Claude CLI 2.1.x in favour of
+    # "What's contributing to your limits usage?", but still parsed so the
+    # app keeps working against older CLI builds.
+    last24h_matches = list(re.finditer(r'last\s*24\s*h', clean, re.IGNORECASE))
+    insights, notes = _extract_best_insights(clean, last24h_matches)
+    result["insights"] = insights
+    result["notes"] = notes
+
+    # Safety net: if the frame walk produced nothing usable (an unfamiliar
+    # layout, or a badly degraded capture), fall back to the original
+    # block-scanning heuristics so we never do worse than before.
+    if not result["session_percent"] and not result["weekly_percent"]:
+        _legacy_block_parse(clean, last24h_matches, result)
+
+    return result
+
+
+def _parse_identity(clean, result):
+    """Extract the CLI version, model descriptor, and plan name."""
+    # "Claude Code v2.1.233"
+    version = re.search(r'Claude\s+Code\s+v([\d]+\.[\d]+\.[\d]+)', clean)
+    if version:
+        result["cli_version"] = version.group(1)
+
+    # Plan + model line, e.g. "Opus 5 (1M context) Claude Max".
     #
     # Structural match only — captures whatever model descriptor the CLI
     # prints and whatever plan name follows it. If Anthropic renames
     # "Claude Max" to "Claude Pro Max" or adds a new tier, this still
     # works; the text is passed through verbatim.
-    # -----------------------------------------------------------------
     plan_match = re.search(
         r'(\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+[\d.]+\s*'
         r'\([^)]*(?:context|tokens|k|M)[^)]*\))\s+'
@@ -407,27 +546,23 @@ def parse_usage(text):
         result["model"] = re.sub(r'\s+', ' ', plan_match.group(1)).strip()
         result["plan"] = re.sub(r'\s+', ' ', plan_match.group(2)).strip()
 
-    # -----------------------------------------------------------------
-    # Anchor on the last "Last 24h" header and walk backwards to find
-    # each preceding section's start. The header anchor uses the LAST
-    # render (which has the Sonnet section populated — earlier renders
-    # may show "Scanning local sessions" instead).
-    #
-    # The Last-24h INSIGHTS themselves are picked from whichever render
-    # produced the most coherent bullets — see lower in this function.
-    # -----------------------------------------------------------------
-    last24h_matches = list(re.finditer(r'last\s*24\s*h', clean, re.IGNORECASE))
+
+def _legacy_block_parse(clean, last24h_matches, result):
+    """Original (pre-2.1.x) section-block parser, kept as a fallback.
+
+    Anchors on the last "Last 24h" header and walks backwards to find each
+    preceding section's start, then scans each block for a percentage and
+    a reset string. Only invoked when the frame-aware parser found no
+    session or weekly percentage at all.
+    """
     if last24h_matches:
         last24h_start = last24h_matches[-1].start()
-        last24h_end = last24h_matches[-1].end()
     else:
         last24h_start = len(clean)
-        last24h_end = len(clean)
 
     # Tolerate degraded sonnet header. Late redraws have been seen as
     # "Sonet nly", "Son et nly", "S nnet only" — basically any cell-split
-    # variation. Match "Current week" + a parenthesized blob whose words
-    # together start with "son" and end with "only"/"nly".
+    # variation.
     sonnet_header = (
         r'current\s*week\s*\(?\s*'
         r'son[a-z]*(?:\s+[a-z]{1,4})*\s*'
@@ -448,48 +583,401 @@ def parse_usage(text):
     session_block = clean[session_start_of_body:all_start]
     all_block = clean[all_end_of_header:sonnet_start]
     sonnet_block = clean[sonnet_end_of_header:last24h_start]
-    last24h_block = clean[last24h_end:]
 
-    # -----------------------------------------------------------------
-    # Session: time-only reset
-    # -----------------------------------------------------------------
     result["session_percent"] = _extract_percent(session_block)
     result["session_reset"] = _extract_reset(session_block, allow_date=False)
-
-    # -----------------------------------------------------------------
-    # Weekly (all models): dated reset
-    # -----------------------------------------------------------------
     result["weekly_percent"] = _extract_percent(all_block)
     result["weekly_reset"] = _extract_reset(all_block, allow_date=True)
-
-    # -----------------------------------------------------------------
-    # Weekly (Sonnet only): dated reset, may show no percent when 0
-    # -----------------------------------------------------------------
     result["sonnet_percent"] = _extract_percent(sonnet_block)
     result["sonnet_reset"] = _extract_reset(sonnet_block, allow_date=True)
+    result["model_bucket_percent"] = result["sonnet_percent"]
+    result["model_bucket_reset"] = result["sonnet_reset"]
 
-    # -----------------------------------------------------------------
-    # Last 24h insights — fully dynamic, purely structural.
-    #
-    # We do NOT hardcode any CLI wording (no "of your usage", no
-    # "sessions", no "context"). Bullets are identified only by their
-    # structural shape: a percentage followed by descriptive text, with
-    # the next bullet starting at the next percentage in the section.
-    # If Anthropic rewords, reorders, adds or removes bullets, this
-    # logic still picks them up.
-    #
-    # The new "Current session" live bar (introduced ~v2.1.x) triggers
-    # an extra terminal redraw that often degrades the bottom of the
-    # box ("96%" → "96 w s", "80%" → "80 essio s"). Picking the LAST
-    # render's Last-24h section then loses bullets. So we evaluate
-    # EVERY Last-24h section in the buffer and use the one with the
-    # most well-formed bullets — typically the first paint.
-    # -----------------------------------------------------------------
-    insights, notes = _extract_best_insights(clean, last24h_matches)
-    result["insights"] = insights
-    result["notes"] = notes
+    # This path scans blocks rather than tracking which rows painted, so
+    # infer presence: a bucket that yielded either a percentage or a reset
+    # was rendered.
+    result["session_reported"] = bool(
+        result["session_percent"] or result["session_reset"]
+    )
+    result["weekly_reported"] = bool(
+        result["weekly_percent"] or result["weekly_reset"]
+    )
+    result["model_bucket_reported"] = bool(
+        result["model_bucket_percent"] or result["model_bucket_reset"]
+    )
 
-    return result
+
+# ---------------------------------------------------------------------------
+# Frame-aware parsing (Claude CLI 2.1.x)
+#
+# The dialog is redrawn several times while asynchronous data lands, and
+# only changed cells are rewritten. Parsing each paint separately and then
+# merging keeps half-drawn rows from poisoning the result.
+# ---------------------------------------------------------------------------
+
+# Every full repaint of the dialog begins with its tab bar, which makes it
+# a dependable frame delimiter.
+_FRAME_SPLIT = re.compile(r'(?=Settings\s+Status\s+Config\s+Usage)')
+_FRAME_SPLIT_FALLBACK = re.compile(r'(?=Current\s+session)', re.IGNORECASE)
+
+_PCT_USED = re.compile(r'(\d{1,3})\s*%\s*used\b', re.IGNORECASE)
+
+_MONTHS = r'jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec'
+
+# A reset string we trust: an optional "Mon DD at" prefix, a clock time,
+# and a timezone in parentheses containing no spaces. That last condition
+# is what rejects half-repainted values such as "(Europe/Athe s)".
+_GOOD_RESET = re.compile(
+    r'^(?:(?:' + _MONTHS + r')[a-z]*\.?\s+\d{1,2}\s+at\s+)?'
+    r'\d{1,2}(?::\d{2})?\s*[ap]m\s*'
+    r'\([A-Za-z][A-Za-z0-9_+\-]*(?:/[A-Za-z0-9_+\-]+)*\)$',
+    re.IGNORECASE,
+)
+
+# A permissive match used to *find* a reset anywhere on a row.
+_ANY_RESET = re.compile(
+    r'(?:(?:' + _MONTHS + r')[a-z]*\.?\s+\d{1,2}\s+(?:at\s+)?)?'
+    r'\d{1,2}(?::\d{2})?\s*[ap]m\s*\([^)]*\)',
+    re.IGNORECASE,
+)
+
+
+def _frames(clean):
+    """Split the cleaned stream into individual screen paints."""
+    parts = [p for p in _FRAME_SPLIT.split(clean) if p.strip()]
+    if len(parts) < 2:
+        parts = [p for p in _FRAME_SPLIT_FALLBACK.split(clean) if p.strip()]
+    return parts or [clean]
+
+
+def _parse_frame(frame):
+    """Extract every field we can from one paint.
+
+    Only keys that were actually found are set, so the merge step can tell
+    "this paint didn't redraw that row" apart from "the value is zero".
+    """
+    found = {}
+    lines = frame.split('\n')
+    _frame_buckets(lines, found)
+    _frame_stats(lines, found)
+    _frame_extras(lines, found)
+    _frame_contributors(lines, found)
+    return found
+
+
+def _num(token):
+    """Parse a token like '1,234', '1.2k' or '3.4M' into an int."""
+    token = token.strip().replace(',', '')
+    m = re.match(r'^([\d.]+)\s*([kKmMbB]?)$', token)
+    if not m:
+        return None
+    try:
+        value = float(m.group(1))
+    except ValueError:
+        return None
+    scale = {'k': 1e3, 'm': 1e6, 'b': 1e9}.get(m.group(2).lower(), 1)
+    return int(value * scale)
+
+
+# --- limit buckets ---------------------------------------------------------
+
+def _is_label(s):
+    """True if `s` looks like a bucket heading rather than data."""
+    if len(re.findall(r'[A-Za-z]', s)) < 2:
+        return False
+    low = s.lower()
+    if s.startswith('+') or 'promo' in low or 'clau.de' in low:
+        return False
+    if _PCT_USED.search(s):
+        return False
+    if re.match(r'^resets?\b', low):
+        return False
+    if _ANY_RESET.match(s.strip()):
+        return False
+    if low.startswith(('total ', 'usage:', 'approximate')):
+        return False
+    return True
+
+
+def _bucket_label(lines, i, match):
+    """Heading for the bucket whose 'NN% used' row is at `lines[i]`.
+
+    The CLI usually puts the heading on its own row above the percentage,
+    but a narrow layout can place both on one row — so check that first.
+    """
+    same_row = (lines[i][:match.start()] + ' ' + lines[i][match.end():]).strip()
+    if _is_label(same_row):
+        return re.sub(r'\s+', ' ', same_row)
+    for j in range(i - 1, max(-1, i - 5), -1):
+        candidate = lines[j].strip()
+        if not candidate:
+            continue
+        if _is_label(candidate):
+            return re.sub(r'\s+', ' ', candidate)
+    return ""
+
+
+def _bucket_reset(lines, i):
+    """Reset string belonging to the bucket whose percentage row is `i`.
+
+    Scans the next few non-blank rows, stopping at the following bucket —
+    each bucket renders as heading / percentage / reset, so the next
+    'NN% used' always precedes the next bucket's reset.
+    """
+    examined = 0
+    for j in range(i, len(lines)):
+        row = lines[j]
+        if j > i:
+            if not row.strip():
+                continue
+            if _PCT_USED.search(row):
+                break
+            examined += 1
+            if examined > 3:
+                break
+        m = _ANY_RESET.search(row)
+        if m:
+            return _tidy_reset(m.group(0))
+    return ""
+
+
+def _bucket_model_name(label):
+    """Model name from a per-model bucket heading.
+
+    'Current week (Fable)' -> 'Fable'. A partial repaint can drop the
+    prefix and leave just 'Fable)', which is handled too.
+    """
+    m = re.search(r'\(([^)]{1,40})\)', label)
+    name = m.group(1) if m else re.sub(
+        r'^\s*current\s+week\s*\(?', '', label, flags=re.IGNORECASE
+    )
+    name = name.strip().rstrip(')').strip()
+    if name.lower() in ('all models', 'all model'):
+        return ""
+    if not re.match(r'^[A-Za-z][A-Za-z0-9 .\-]{0,30}$', name):
+        return ""
+    return name
+
+
+def _classify_bucket(label, index):
+    """Map a bucket heading to session / weekly / model."""
+    low = label.lower()
+    if 'session' in low:
+        return 'session'
+    if 'all model' in low:
+        return 'weekly'
+    if label:
+        return 'model'
+    # Heading never repainted — fall back to render order.
+    return ('session', 'weekly', 'model')[index] if index < 3 else 'model'
+
+
+def _frame_buckets(lines, found):
+    """Read every 'NN% used' bucket in this paint."""
+    buckets = []
+    for i, line in enumerate(lines):
+        m = _PCT_USED.search(line)
+        if not m:
+            continue
+        percent = int(m.group(1))
+        if percent > 100:
+            continue
+        buckets.append({
+            'label': _bucket_label(lines, i, m),
+            'percent': percent,
+            'reset': _bucket_reset(lines, i),
+        })
+
+    for index, bucket in enumerate(buckets):
+        kind = _classify_bucket(bucket['label'], index)
+        if kind == 'session':
+            found['session_percent'] = bucket['percent']
+            if bucket['reset']:
+                found['session_reset'] = bucket['reset']
+        elif kind == 'weekly':
+            found['weekly_percent'] = bucket['percent']
+            if bucket['reset']:
+                found['weekly_reset'] = bucket['reset']
+        else:
+            found['model_bucket_percent'] = bucket['percent']
+            if bucket['reset']:
+                found['model_bucket_reset'] = bucket['reset']
+            name = _bucket_model_name(bucket['label'])
+            if name:
+                found['model_bucket_name'] = name
+
+
+# --- session stats ---------------------------------------------------------
+
+def _frame_stats(lines, found):
+    """Read the 'Stats / Session' block added in Claude CLI 2.1.x."""
+    for line in lines:
+        s = line.strip()
+
+        m = re.match(r'Total\s+cost:\s*\$\s*([\d.,]+)', s, re.IGNORECASE)
+        if m:
+            try:
+                found['session_cost_usd'] = float(m.group(1).replace(',', ''))
+            except ValueError:
+                pass
+            continue
+
+        m = re.match(r'Total\s+duration\s*\(\s*API\s*\)\s*:\s*(.+)$', s, re.IGNORECASE)
+        if m:
+            found['session_api_duration'] = re.sub(r'\s+', ' ', m.group(1)).strip()
+            continue
+
+        m = re.match(r'Total\s+duration\s*\(\s*wall\s*\)\s*:\s*(.+)$', s, re.IGNORECASE)
+        if m:
+            found['session_wall_duration'] = re.sub(r'\s+', ' ', m.group(1)).strip()
+            continue
+
+        m = re.match(r'Total\s+code\s+changes:\s*(.+)$', s, re.IGNORECASE)
+        if m:
+            body = m.group(1)
+            added = re.search(r'([\d.,]+\s*[kKmMbB]?)\s*lines?\s+added', body, re.IGNORECASE)
+            removed = re.search(r'([\d.,]+\s*[kKmMbB]?)\s*lines?\s+removed', body, re.IGNORECASE)
+            # A degraded repaint ("0 li es added") simply fails to match;
+            # the merge then keeps a cleaner paint's value.
+            if added and _num(added.group(1)) is not None:
+                found['lines_added'] = _num(added.group(1))
+            if removed and _num(removed.group(1)) is not None:
+                found['lines_removed'] = _num(removed.group(1))
+            continue
+
+        m = re.match(r'Usage:\s*(.+)$', s, re.IGNORECASE)
+        if m:
+            body = m.group(1)
+            for key, label in (
+                ('tokens_input', r'input'),
+                ('tokens_output', r'output'),
+                ('tokens_cache_read', r'cache\s*read'),
+                ('tokens_cache_write', r'cache\s*write'),
+            ):
+                mm = re.search(r'([\d.,]+\s*[kKmMbB]?)\s*' + label, body, re.IGNORECASE)
+                if mm and _num(mm.group(1)) is not None:
+                    found[key] = _num(mm.group(1))
+
+
+# --- promo banner + usage credits -----------------------------------------
+
+def _frame_extras(lines, found):
+    """Read the promo banner and the usage-credits row."""
+    for line in lines:
+        s = re.sub(r'\s+', ' ', line.strip())
+        low = s.lower()
+
+        if 'promo' in low and '%' in s:
+            url = re.search(
+                r'\b((?:https?://)?[a-z0-9][a-z0-9.\-]*\.[a-z]{2,}/\S+)', s, re.IGNORECASE
+            )
+            if url:
+                found['promo_url'] = url.group(1)
+                s = s.replace(url.group(1), '')
+            found['promo_text'] = s.strip(' .,-')
+            continue
+
+        if re.search(r'credits?\s+are\s+', low):
+            found['credits_text'] = s
+            found['credits_enabled'] = not re.search(r'credits?\s+are\s+off', low)
+
+
+# --- "What's contributing to your limits usage?" ---------------------------
+
+def _frame_contributors(lines, found):
+    """Read the contributing-usage table that replaced the Last-24h block.
+
+    The table is populated asynchronously from a scan of local sessions,
+    so most paints show only a "Scanning local sessions…" placeholder —
+    recorded as a status so the UI can say so rather than showing nothing.
+    """
+    start = None
+    for i, line in enumerate(lines):
+        if re.search(r'contributing\s+to\s+your\s+limits', line, re.IGNORECASE):
+            start = i + 1
+            break
+    if start is None:
+        return
+
+    rows = []
+    status = ''
+    for line in lines[start:start + 30]:
+        s = re.sub(r'\s{3,}', '  ', line.rstrip()).strip()
+        if not s:
+            continue
+        low = s.lower()
+        if low.startswith('approximate') or 'does not include' in low:
+            continue
+        if 'scanning' in low or 'refreshing' in low:
+            status = 'scanning'
+            continue
+        if 'esc to cancel' in low:
+            continue
+        if re.search(r'current\s+(session|week)', low) or 'usage credits' in low:
+            break
+        # "<name>  NN%" or "NN%  <name>" — accept either column order.
+        m = re.match(r'^(.{1,48}?)\s{2,}(\d{1,3})\s*%$', s)
+        if m and int(m.group(2)) <= 100:
+            rows.append({'name': m.group(1).strip(), 'percent': int(m.group(2))})
+            continue
+        m = re.match(r'^(\d{1,3})\s*%\s+(.{1,48})$', s)
+        if m and int(m.group(1)) <= 100:
+            rows.append({'name': m.group(2).strip(), 'percent': int(m.group(1))})
+
+    if rows:
+        found['contributors'] = rows
+        found['contributors_status'] = 'ready'
+    elif status:
+        found['contributors_status'] = status
+
+
+# --- merge -----------------------------------------------------------------
+
+# Fields where the freshest paint wins: they legitimately change between
+# repaints (a percentage ticking up, a duration counting on).
+_FRESHEST_WINS = (
+    'session_percent', 'weekly_percent', 'model_bucket_percent',
+    'model_bucket_name',
+    'session_cost_usd', 'session_api_duration', 'session_wall_duration',
+    'lines_added', 'lines_removed',
+    'tokens_input', 'tokens_output', 'tokens_cache_read', 'tokens_cache_write',
+    'promo_text', 'promo_url', 'credits_text', 'credits_enabled',
+    'contributors', 'contributors_status',
+)
+
+
+def _merge_frames(frames, result):
+    """Fold per-paint results into one, preferring fresh, well-formed values."""
+    for key in _FRESHEST_WINS:
+        for frame in frames:
+            if key in frame:
+                result[key] = frame[key]
+
+    # Reset strings get stricter treatment: take the freshest value that is
+    # also well-formed, so a partially repainted timezone never wins over a
+    # clean one from an earlier paint.
+    for key in ('session_reset', 'weekly_reset', 'model_bucket_reset'):
+        best = ''
+        for frame in frames:
+            value = frame.get(key, '')
+            if not value:
+                continue
+            if _GOOD_RESET.match(value) or not best:
+                best = value
+        result[key] = best
+
+    # Record which buckets actually painted, so the UI can show "unknown"
+    # rather than a misleading 0%.
+    for percent_key, flag_key in (
+        ('session_percent', 'session_reported'),
+        ('weekly_percent', 'weekly_reported'),
+        ('model_bucket_percent', 'model_bucket_reported'),
+    ):
+        result[flag_key] = any(percent_key in frame for frame in frames)
+
+    # Keep the pre-2.1.x key names working as aliases.
+    result['sonnet_percent'] = result['model_bucket_percent']
+    result['sonnet_reset'] = result['model_bucket_reset']
 
 
 def _extract_best_insights(clean, last24h_matches):

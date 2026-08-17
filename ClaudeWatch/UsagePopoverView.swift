@@ -48,11 +48,26 @@ struct UsagePopoverView: View {
                                 if let update = updateChecker.availableUpdate {
                                     UpdateBanner(update: update)
                                 }
+                                if !usage.promoText.isEmpty {
+                                    promoBanner(usage)
+                                }
                                 sessionCard(usage)
                                 weeklyCard(usage)
-                                sonnetCard(usage)
+                                // Omitted entirely when the CLI didn't report
+                                // it — an empty placeholder card would imply a
+                                // limit we actually know nothing about.
+                                if usage.modelBucketReported {
+                                    modelBucketCard(usage)
+                                }
+                                if hasSessionStats(usage) {
+                                    sessionStatsCard(usage)
+                                }
                                 if !usage.insights.isEmpty || !usage.notes.isEmpty {
                                     last24hCard(usage)
+                                }
+                                if !usage.contributors.isEmpty
+                                    || usage.contributorsStatus == "scanning" {
+                                    contributorsCard(usage)
                                 }
                                 executionInfoCard(usage)
                             }
@@ -330,7 +345,8 @@ struct UsagePopoverView: View {
             countdownText: timeUntilReset(usage.sessionReset),
             gradient: gradient,
             icon: "clock.fill",
-            iconBackground: gradient
+            iconBackground: gradient,
+            isReported: usage.sessionReported
         )
     }
 
@@ -343,23 +359,43 @@ struct UsagePopoverView: View {
             countdownText: timeUntilReset(usage.weeklyReset),
             gradient: gradient,
             icon: "calendar",
-            iconBackground: gradient
+            iconBackground: gradient,
+            isReported: usage.weeklyReported
         )
     }
 
-    func sonnetCard(_ usage: ClaudeUsage) -> some View {
-        let gradient = usageGradient(for: usage.sonnetPercentage)
-        // Sonnet has its own independent reset — fall back to weekly only if
-        // the script couldn't extract the Sonnet-specific reset.
-        let resetSource = usage.sonnetReset.isEmpty ? usage.weeklyReset : usage.sonnetReset
+    /// Weekly sub-limit for a single model.
+    ///
+    /// This bucket used to be Sonnet-specific ("Current week (Sonnet only)"),
+    /// but Claude CLI 2.1.x names it after whichever model the sub-limit
+    /// currently applies to — "Current week (Fable)", for example. The title
+    /// therefore follows whatever the CLI reports rather than hardcoding a
+    /// model name.
+    func modelBucketCard(_ usage: ClaudeUsage) -> some View {
+        let gradient = usageGradient(for: usage.modelBucketPercentage)
+        // The bucket has its own independent reset — fall back to the
+        // all-models weekly reset only if the script couldn't extract it.
+        let resetSource = usage.modelBucketReset.isEmpty
+            ? usage.weeklyReset
+            : usage.modelBucketReset
+        let title = usage.modelBucketName.isEmpty
+            ? "Weekly (Model Limit)"
+            : "Weekly (\(usage.modelBucketName))"
+        // When the CLI didn't render this bucket we know nothing about it —
+        // so show no reset or countdown either, rather than borrowing the
+        // all-models reset and implying the figure is real.
+        let reported = usage.modelBucketReported
         return EnhancedUsageCard(
-            title: "Weekly (Sonnet Only)",
-            percentage: usage.sonnetPercentage,
-            resetText: resetSource.isEmpty ? nil : "Resets \(resetSource)",
-            countdownText: timeUntilReset(resetSource),
+            title: title,
+            percentage: usage.modelBucketPercentage,
+            resetText: reported
+                ? (resetSource.isEmpty ? nil : "Resets \(resetSource)")
+                : "Not reported by Claude CLI",
+            countdownText: reported ? timeUntilReset(resetSource) : nil,
             gradient: gradient,
             icon: "sparkles",
-            iconBackground: gradient
+            iconBackground: gradient,
+            isReported: reported
         )
     }
 
@@ -430,6 +466,202 @@ struct UsagePopoverView: View {
         }
     }
 
+    // MARK: - Session Stats Card
+
+    /// Compact count formatting so seven-digit token totals stay readable.
+    func formatCount(_ value: Int) -> String {
+        switch value {
+        case 1_000_000...:
+            return String(format: "%.1fM", Double(value) / 1_000_000)
+        case 1_000...:
+            return String(format: "%.1fk", Double(value) / 1_000)
+        default:
+            return "\(value)"
+        }
+    }
+
+    /// True when the CLI reported anything in its Stats block. A brand new
+    /// session is genuinely all-zero, so we hide the card rather than show
+    /// a wall of noughts.
+    func hasSessionStats(_ usage: ClaudeUsage) -> Bool {
+        usage.sessionCostUSD > 0
+            || usage.tokensInput > 0 || usage.tokensOutput > 0
+            || usage.tokensCacheRead > 0 || usage.tokensCacheWrite > 0
+            || usage.linesAdded > 0 || usage.linesRemoved > 0
+    }
+
+    /// Session cost, duration, code churn and token counts — the "Stats"
+    /// block Claude CLI 2.1.x added above the limit bars.
+    func sessionStatsCard(_ usage: ClaudeUsage) -> some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(hex: "6366f1"), Color(hex: "8b5cf6")],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 30, height: 30)
+                        Image(systemName: "chart.pie.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Session Stats")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.primary)
+                        Text("This Claude Code session")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                }
+
+                Divider().background(Color.primary.opacity(0.1))
+
+                VStack(spacing: 8) {
+                    if usage.sessionCostUSD > 0 {
+                        InfoRowSmall(
+                            icon: "dollarsign.circle",
+                            label: "Cost",
+                            value: String(format: "$%.4f", usage.sessionCostUSD)
+                        )
+                    }
+                    if !usage.sessionWallDuration.isEmpty {
+                        InfoRowSmall(
+                            icon: "timer",
+                            label: "Duration",
+                            value: usage.sessionApiDuration.isEmpty
+                                ? usage.sessionWallDuration
+                                : "\(usage.sessionWallDuration) · API \(usage.sessionApiDuration)"
+                        )
+                    }
+                    if usage.linesAdded > 0 || usage.linesRemoved > 0 {
+                        InfoRowSmall(
+                            icon: "chevron.left.forwardslash.chevron.right",
+                            label: "Code",
+                            value: "+\(formatCount(usage.linesAdded)) / -\(formatCount(usage.linesRemoved))"
+                        )
+                    }
+                    if usage.tokensInput > 0 || usage.tokensOutput > 0 {
+                        InfoRowSmall(
+                            icon: "arrow.up.arrow.down",
+                            label: "Tokens",
+                            value: "\(formatCount(usage.tokensInput)) in · \(formatCount(usage.tokensOutput)) out"
+                        )
+                    }
+                    if usage.tokensCacheRead > 0 || usage.tokensCacheWrite > 0 {
+                        InfoRowSmall(
+                            icon: "externaldrive",
+                            label: "Cache",
+                            value: "\(formatCount(usage.tokensCacheRead)) read · \(formatCount(usage.tokensCacheWrite)) write"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Contributing Usage Card
+
+    /// "What's contributing to your limits usage?" — the table Claude CLI
+    /// 2.1.x builds by scanning local sessions. It populates asynchronously,
+    /// so a "still scanning" state is normal rather than an error.
+    func contributorsCard(_ usage: ClaudeUsage) -> some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(hex: "0ea5e9"), Color(hex: "06b6d4")],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 30, height: 30)
+                        Image(systemName: "list.bullet.rectangle")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("What's Contributing")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.primary)
+                        Text("Approximate, local sessions only")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                }
+
+                Divider().background(Color.primary.opacity(0.1))
+
+                if usage.contributors.isEmpty {
+                    Text("Claude is still scanning local sessions — this fills in once the scan finishes.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(usage.contributors) { row in
+                            InfoRowSmall(
+                                icon: "circle.fill",
+                                label: row.name,
+                                value: "\(row.percent)%"
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Promo Banner
+
+    /// Surfaces a limits promotion when Anthropic is running one (e.g.
+    /// "+50% weekly limits promo through Aug 19").
+    func promoBanner(_ usage: ClaudeUsage) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "gift.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(Color(hex: "10b981"))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(usage.promoText)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.primary)
+                if !usage.promoURL.isEmpty {
+                    Text(usage.promoURL)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(hex: "10b981").opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color(hex: "10b981").opacity(0.3), lineWidth: 1)
+        )
+        .onTapGesture {
+            guard !usage.promoURL.isEmpty else { return }
+            let raw = usage.promoURL.hasPrefix("http")
+                ? usage.promoURL
+                : "https://\(usage.promoURL)"
+            if let url = URL(string: raw) {
+                NSWorkspace.shared.open(url)
+            }
+        }
+    }
+
     // MARK: - Execution Info Card
 
     func executionInfoCard(_ usage: ClaudeUsage) -> some View {
@@ -469,6 +701,23 @@ struct UsagePopoverView: View {
                         label: "Data Size",
                         value: "\(usage.rawOutput.count) chars"
                     )
+                    if !usage.cliVersion.isEmpty {
+                        InfoRowSmall(
+                            icon: "terminal",
+                            label: "Claude CLI",
+                            value: "v\(usage.cliVersion)"
+                        )
+                    }
+                    // Rendered from the parsed boolean rather than the raw
+                    // CLI line, which a partial repaint can corrupt.
+                    if !usage.creditsText.isEmpty {
+                        InfoRowSmall(
+                            icon: "creditcard",
+                            label: "Usage Credits",
+                            value: usage.creditsEnabled ? "On" : "Off",
+                            valueColor: usage.creditsEnabled ? .green : .secondary
+                        )
+                    }
                 }
             }
         }
@@ -645,7 +894,23 @@ struct EnhancedUsageCard: View {
     let icon: String
     let iconBackground: [Color]
 
+    /// Whether the CLI actually rendered this bucket. When false the card
+    /// shows "—" instead of 0%: an unrendered bucket is unknown, not empty,
+    /// and a green 0% bar would imply a full allowance the user may not have.
+    var isReported: Bool = true
+
     @State private var animatedPercentage: Double = 0
+
+    /// Grey everything out when the value is unknown, so an unreported
+    /// bucket never reads as a healthy one.
+    private var effectiveGradient: [Color] {
+        isReported ? gradient : [Color.secondary.opacity(0.5), Color.secondary.opacity(0.35)]
+    }
+
+    /// Never animate a ring or bar for a value we don't have.
+    private var effectivePercentage: Double {
+        isReported ? percentage : 0
+    }
 
     var body: some View {
         GlassCard {
@@ -683,7 +948,7 @@ struct EnhancedUsageCard: View {
                                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                             }
                             .foregroundStyle(
-                                LinearGradient(colors: gradient, startPoint: .leading, endPoint: .trailing)
+                                LinearGradient(colors: effectiveGradient, startPoint: .leading, endPoint: .trailing)
                             )
                         }
                     }
@@ -699,16 +964,16 @@ struct EnhancedUsageCard: View {
                         Circle()
                             .trim(from: 0, to: animatedPercentage / 100)
                             .stroke(
-                                LinearGradient(colors: gradient, startPoint: .topLeading, endPoint: .bottomTrailing),
+                                LinearGradient(colors: effectiveGradient, startPoint: .topLeading, endPoint: .bottomTrailing),
                                 style: StrokeStyle(lineWidth: 4, lineCap: .round)
                             )
                             .frame(width: 50, height: 50)
                             .rotationEffect(.degrees(-90))
 
-                        Text("\(Int(percentage))%")
+                        Text(isReported ? "\(Int(percentage))%" : "—")
                             .font(.system(size: 12, weight: .bold, design: .rounded))
                             .foregroundStyle(
-                                LinearGradient(colors: gradient, startPoint: .topLeading, endPoint: .bottomTrailing)
+                                LinearGradient(colors: effectiveGradient, startPoint: .topLeading, endPoint: .bottomTrailing)
                             )
                     }
                 }
@@ -722,10 +987,10 @@ struct EnhancedUsageCard: View {
 
                         RoundedRectangle(cornerRadius: 6)
                             .fill(
-                                LinearGradient(colors: gradient, startPoint: .leading, endPoint: .trailing)
+                                LinearGradient(colors: effectiveGradient, startPoint: .leading, endPoint: .trailing)
                             )
                             .frame(width: geometry.size.width * min(animatedPercentage / 100, 1.0), height: 8)
-                            .shadow(color: gradient.first?.opacity(0.5) ?? .clear, radius: 4, x: 0, y: 2)
+                            .shadow(color: effectiveGradient.first?.opacity(0.5) ?? .clear, radius: 4, x: 0, y: 2)
                     }
                 }
                 .frame(height: 8)
@@ -737,12 +1002,17 @@ struct EnhancedUsageCard: View {
             // expired. Respects UpdateChecker's internal 6h cache.
             UpdateChecker.shared.checkForUpdates()
             withAnimation(.easeOut(duration: 0.8)) {
-                animatedPercentage = percentage
+                animatedPercentage = effectivePercentage
             }
         }
-        .onChange(of: percentage) { newValue in
+        .onChange(of: percentage) { _ in
             withAnimation(.easeOut(duration: 0.5)) {
-                animatedPercentage = newValue
+                animatedPercentage = effectivePercentage
+            }
+        }
+        .onChange(of: isReported) { _ in
+            withAnimation(.easeOut(duration: 0.5)) {
+                animatedPercentage = effectivePercentage
             }
         }
     }

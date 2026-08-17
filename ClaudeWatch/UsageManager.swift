@@ -71,6 +71,33 @@ struct UsageNote: Identifiable, Codable {
     }
 }
 
+/// One row of the "What's contributing to your limits usage?" table that
+/// Claude CLI 2.1.x renders in place of the old Last-24h breakdown. The
+/// table is populated asynchronously from a scan of local sessions, so it
+/// is frequently empty — see `ClaudeUsage.contributorsStatus`.
+struct UsageContributor: Identifiable, Codable {
+    let id: UUID
+    let name: String
+    let percent: Int
+
+    enum CodingKeys: String, CodingKey {
+        case name, percent
+    }
+
+    init(name: String, percent: Int) {
+        self.id = UUID()
+        self.name = name
+        self.percent = percent
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = UUID()
+        self.name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        self.percent = try c.decodeIfPresent(Int.self, forKey: .percent) ?? 0
+    }
+}
+
 /// Represents Claude Code usage statistics
 struct ClaudeUsage {
     /// Current session usage percentage (0-100)
@@ -104,6 +131,80 @@ struct ClaudeUsage {
     /// Model descriptor shown in the CLI status line (e.g., "Opus 4.7 (1M context)").
     var model: String = ""
 
+    /// Claude Code CLI version the data was read from (e.g., "2.1.233").
+    var cliVersion: String = ""
+
+    // MARK: Per-model weekly bucket
+    //
+    // The CLI used to label this bucket "Current week (Sonnet only)". As of
+    // 2.1.x it is named after whichever model the weekly sub-limit applies
+    // to — "Current week (Fable)", for instance. `sonnetPercentage` above is
+    // kept as an alias so nothing that referenced it breaks.
+
+    /// Model this weekly sub-limit applies to (e.g., "Fable"); empty if unknown.
+    var modelBucketName: String = ""
+
+    /// Usage percentage for the per-model weekly bucket (0-100).
+    var modelBucketPercentage: Double = 0
+
+    /// Reset time for the per-model weekly bucket.
+    var modelBucketReset: String = ""
+
+    // MARK: Bucket presence
+    //
+    // A bucket the CLI never rendered is NOT a bucket at 0%. The per-model
+    // bucket loads asynchronously and is sometimes absent altogether, so
+    // showing 0% would tell the user they have their full allowance left
+    // when they might have almost none. The UI renders "—" when these are
+    // false rather than a reassuring empty bar.
+
+    var sessionReported: Bool = false
+    var weeklyReported: Bool = false
+    var modelBucketReported: Bool = false
+
+    // MARK: Session stats (Claude CLI 2.1.x "Stats" block)
+
+    /// Total cost of the current session in USD.
+    var sessionCostUSD: Double = 0
+
+    /// Wall-clock time spent waiting on the API this session (e.g., "12s").
+    var sessionApiDuration: String = ""
+
+    /// Total elapsed time of the session (e.g., "3m 4s").
+    var sessionWallDuration: String = ""
+
+    /// Lines of code added / removed by the session.
+    var linesAdded: Int = 0
+    var linesRemoved: Int = 0
+
+    /// Token counts for the session.
+    var tokensInput: Int = 0
+    var tokensOutput: Int = 0
+    var tokensCacheRead: Int = 0
+    var tokensCacheWrite: Int = 0
+
+    // MARK: Extras
+
+    /// Active promotion banner text, if the CLI is advertising one.
+    var promoText: String = ""
+
+    /// Companion link for the promotion banner.
+    var promoURL: String = ""
+
+    /// Whether usage credits are switched on for this account.
+    var creditsEnabled: Bool = false
+
+    /// Raw usage-credits line as rendered (may be partially redrawn — prefer
+    /// `creditsEnabled` for anything user-facing).
+    var creditsText: String = ""
+
+    /// Rows of the "what's contributing" table (often empty — see status).
+    var contributors: [UsageContributor] = []
+
+    /// "ready" once the table has data, "scanning" while the CLI is still
+    /// walking local sessions, empty when the section wasn't rendered.
+    var contributorsStatus: String = ""
+
     /// Timestamp of when this data was fetched
     var lastUpdated: Date = Date()
 
@@ -125,6 +226,31 @@ struct UsageJSON: Codable {
     let model: String?
     let raw: String?
     let error: String?
+
+    // Fields added alongside Claude CLI 2.1.x. All optional, so a script
+    // that predates them still decodes.
+    let model_bucket_name: String?
+    let model_bucket_percent: Int?
+    let model_bucket_reset: String?
+    let cli_version: String?
+    let session_cost_usd: Double?
+    let session_api_duration: String?
+    let session_wall_duration: String?
+    let lines_added: Int?
+    let lines_removed: Int?
+    let tokens_input: Int?
+    let tokens_output: Int?
+    let tokens_cache_read: Int?
+    let tokens_cache_write: Int?
+    let promo_text: String?
+    let promo_url: String?
+    let credits_enabled: Bool?
+    let credits_text: String?
+    let contributors: [UsageContributor]?
+    let contributors_status: String?
+    let session_reported: Bool?
+    let weekly_reported: Bool?
+    let model_bucket_reported: Bool?
 }
 
 // MARK: - Settings Keys
@@ -245,6 +371,12 @@ class UsageManager: ObservableObject {
 
         isLoading = true
         errorMessage = nil
+
+        // Nudge observers at the START of a fetch, not just at the end. The
+        // menu bar shows "Loading…" while a fetch is in flight and no data
+        // has arrived yet; without this it would keep showing the pre-fetch
+        // placeholder until the first result landed.
+        NotificationCenter.default.post(name: .usageDidUpdate, object: nil)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
@@ -466,6 +598,43 @@ class UsageManager: ObservableObject {
             usage.plan = usageJSON.plan ?? ""
             usage.model = usageJSON.model ?? ""
             usage.rawOutput = usageJSON.raw ?? ""
+
+            // Per-model weekly bucket. Fall back to the legacy `sonnet_*`
+            // keys so an older bundled script still populates the card.
+            usage.modelBucketName = usageJSON.model_bucket_name ?? ""
+            usage.modelBucketPercentage = Double(
+                usageJSON.model_bucket_percent ?? usageJSON.sonnet_percent ?? 0
+            )
+            usage.modelBucketReset = usageJSON.model_bucket_reset
+                ?? usageJSON.sonnet_reset ?? ""
+
+            usage.cliVersion = usageJSON.cli_version ?? ""
+            usage.sessionCostUSD = usageJSON.session_cost_usd ?? 0
+            usage.sessionApiDuration = usageJSON.session_api_duration ?? ""
+            usage.sessionWallDuration = usageJSON.session_wall_duration ?? ""
+            usage.linesAdded = usageJSON.lines_added ?? 0
+            usage.linesRemoved = usageJSON.lines_removed ?? 0
+            usage.tokensInput = usageJSON.tokens_input ?? 0
+            usage.tokensOutput = usageJSON.tokens_output ?? 0
+            usage.tokensCacheRead = usageJSON.tokens_cache_read ?? 0
+            usage.tokensCacheWrite = usageJSON.tokens_cache_write ?? 0
+            usage.promoText = usageJSON.promo_text ?? ""
+            usage.promoURL = usageJSON.promo_url ?? ""
+            usage.creditsEnabled = usageJSON.credits_enabled ?? false
+            usage.creditsText = usageJSON.credits_text ?? ""
+            usage.contributors = usageJSON.contributors ?? []
+            usage.contributorsStatus = usageJSON.contributors_status ?? ""
+
+            // Presence flags. A script predating them omits the keys, so
+            // infer from the data itself: a bucket that produced either a
+            // percentage or a reset time was rendered.
+            usage.sessionReported = usageJSON.session_reported
+                ?? (usage.sessionPercentage > 0 || !usage.sessionReset.isEmpty)
+            usage.weeklyReported = usageJSON.weekly_reported
+                ?? (usage.weeklyPercentage > 0 || !usage.weeklyReset.isEmpty)
+            usage.modelBucketReported = usageJSON.model_bucket_reported
+                ?? (usage.modelBucketPercentage > 0 || !usage.modelBucketReset.isEmpty)
+
             usage.lastUpdated = Date()
 
             return .success(usage)
